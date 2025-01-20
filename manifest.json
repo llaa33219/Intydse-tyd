@@ -1,0 +1,25 @@
+{
+  "name": "엔트리-Intydse tyd",
+  "version": "1.0",
+  "description": "엔트리 이야기를 실시간으로 업데이트해 줍니다.",
+  "manifest_version": 3,
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": [
+    "https://playentry.org/*"
+  ],
+  "content_scripts": [
+    {
+    "matches": [
+      "https://playentry.org/community/entrystory/*"
+    ],
+    "js": [
+      "contentScript.js"
+    ]
+    }
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}
