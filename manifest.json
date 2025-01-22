@@ -1,6 +1,6 @@
 {
   "name": "엔트리-Intydse tyd",
-  "version": "1.1",
+  "version": "1.2",
   "description": "엔트리 이야기를 실시간으로 업데이트해 줍니다.",
   "manifest_version": 3,
   "permissions": ["activeTab", "scripting"],

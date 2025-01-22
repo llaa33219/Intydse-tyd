@@ -75,7 +75,7 @@ function startEntrystoryScript() {
   if (scriptStarted) return; // 이미 시작했다면 중복 방지
   scriptStarted = true;
 
-  // ★ 여기서 매번 다시 초기화해 URL을 벗어났다가 돌아올 때 새로 시작하도록 함
+  // ★ 여기서 매번 다시 초기화해 URL을 벗어나거나 돌아올 때 새로 시작하도록 함
   knownIds.clear();
   isFirstFetch = true;
 
@@ -348,7 +348,7 @@ function startEntrystoryScript() {
       }
       stickerHtml = `
         <em class="css-18ro4ma e1877mpo0">
-          <img src="${stUrl}" alt="sticker">
+          <img src="${stUrl}" alt="sticker" style="width: 74px; height: 74px;">
         </em>
       `.trim();
     }
@@ -366,6 +366,7 @@ function startEntrystoryScript() {
       </a>
       <em>${dateStr}</em>
     </div>
+    <!-- 글 내용이 들어가는 영역 -->
     <div class="css-6wq60h e1i41bku1">
       ${contentHtml}
     </div>
@@ -393,8 +394,10 @@ function startEntrystoryScript() {
     `.trim();
   }
 
-  // "댓글 펼침" 상태 HTML
-  function createExpandedPostHTML(item, commentsArray) {
+  /**
+   * "댓글 닫힘" <li> DOM 생성
+   */
+  function makeCollapsedLi(item) {
     const userId = item.user?.id || "";
     const userName = item.user?.nickname || "NoName";
     const dateStr = formatDate(item.created);
@@ -402,244 +405,63 @@ function startEntrystoryScript() {
     const commentCount = item.commentsLength || 0;
     const contentHtml = convertLinks(item.content || "");
 
-    // 프로필 BG
-    let bgStyle = 'background-image: url("/img/EmptyImage.svg");';
+    let backgroundStyle = 'background-image: url("/img/EmptyImage.svg");';
     const pf = item?.user?.profileImage;
     if (pf && pf.filename && pf.filename.length >= 4) {
       const sub1 = pf.filename.substring(0, 2);
       const sub2 = pf.filename.substring(2, 4);
       if (pf.imageType) {
-        bgStyle = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}.${pf.imageType}'), url('/img/EmptyImage.svg');`;
+        backgroundStyle = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}.${pf.imageType}'), url('/img/EmptyImage.svg');`;
       } else {
-        bgStyle = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}'), url('/img/EmptyImage.svg');`;
+        backgroundStyle = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}'), url('/img/EmptyImage.svg');`;
       }
     }
-    const likeClass = item.isLike ? "like active" : "like";
 
-    // [마크 표시용]
-    let userMarkHtml = "";
-    const mark = item?.user?.mark;
-    if (mark && mark.filename && mark.filename.length >= 4) {
-      const msub1 = mark.filename.substring(0, 2);
-      const msub2 = mark.filename.substring(2, 4);
-      let markUrl = `/uploads/${msub1}/${msub2}/${mark.filename}`;
-      if (mark.imageType) {
-        markUrl += `.${mark.imageType}`;
-      }
-      userMarkHtml = `
-        <span class="css-1b1jxqs ee2n3ac2"
-          style="background-image: url('${markUrl}'), url('/img/EmptyImage.svg');
-                 display: inline-block; 
-                 font-size: 14px; 
-                 font-weight: 600; 
-                 color: rgb(255, 255, 255); 
-                 line-height: 16px; 
-                 vertical-align: top;">
-          <span class="blind">${mark.name || "마크"}</span>
-        </span>
-      `.trim();
-    }
+    const htmlString = createCollapsedPostHTML(
+      item, backgroundStyle, contentHtml, dateStr, likeCount, commentCount, userId, userName
+    );
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlString;
+    const li = tempDiv.firstElementChild; // <li>
+    li.__itemData = item;
 
-    // [게시글에 달린 sticker 표시]
-    let stickerHtml = "";
-    if (item.sticker && item.sticker.filename && item.sticker.filename.length >= 4) {
-      const stSub1 = item.sticker.filename.substring(0, 2);
-      const stSub2 = item.sticker.filename.substring(2, 4);
-      let stUrl = `/uploads/${stSub1}/${stSub2}/${item.sticker.filename}`;
-      if (item.sticker.imageType) {
-        stUrl += `.${item.sticker.imageType}`;
-      }
-      stickerHtml = `
-        <em class="css-18ro4ma e1877mpo0">
-          <img src="${stUrl}" alt="sticker">
-        </em>
-      `.trim();
-    }
-
-    // 댓글 목록
-    const commentLis = commentsArray.map((c) => {
-      const cUserId = c.user?.id || "";
-      const cUserName = c.user?.nickname || "NoName";
-      const cDate = formatDate(c.created);
-      const cHtml = convertLinks(c.content || "");
-      const cLike = c.likesLength || 0;
-      const cLikeClass = c.isLike ? "like active" : "like";
-
-      // 댓글 프로필 BG
-      let cBg = 'background-image: url("/img/EmptyImage.svg");';
-      const cPf = c?.user?.profileImage;
-      if (cPf && cPf.filename && cPf.filename.length >= 4) {
-        const ccSub1 = cPf.filename.substring(0, 2);
-        const ccSub2 = cPf.filename.substring(2, 4);
-        if (cPf.imageType) {
-          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}.${cPf.imageType}'), url('/img/EmptyImage.svg');`;
+    // 이벤트 연결
+    // 1) "댓글 버튼(.reply)" -> 펼치기 / 접기 (토글)
+    const replyBtn = li.querySelector('.reply');
+    if (replyBtn) {
+      replyBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const existingCommentSection = li.querySelector('.css-4e8bhg.euhmxlr2');
+        if (existingCommentSection) {
+          // 이미 댓글이 펼쳐진 상태 -> 접기
+          revertToCollapsed(li);
         } else {
-          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}'), url('/img/EmptyImage.svg');`;
+          // 접힌 상태 -> 펼치기
+          fetchCommentsThenExpand(li);
         }
-      }
-
-      // [마크 표시 - 댓글 작성자]
-      let cUserMarkHtml = "";
-      const cMark = c?.user?.mark;
-      if (cMark && cMark.filename && cMark.filename.length >= 4) {
-        const cmSub1 = cMark.filename.substring(0, 2);
-        const cmSub2 = cMark.filename.substring(2, 4);
-        let cMarkUrl = `/uploads/${cmSub1}/${cmSub2}/${cMark.filename}`;
-        if (cMark.imageType) {
-          cMarkUrl += `.${cMark.imageType}`;
+      });
+    }
+    // 2) 좋아요 버튼
+    const likeBtn = li.querySelector('.like');
+    if (likeBtn) {
+      likeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (item.isLike) {
+          // 이미 좋아요면 -> unlike
+          unlikeDiscuss(item.id, likeBtn, "discuss");
+        } else {
+          // 아니면 -> like
+          likeDiscuss(item.id, likeBtn, "discuss");
         }
-        cUserMarkHtml = `
-          <span class="css-1b1jxqs ee2n3ac2"
-            style="background-image: url('${cMarkUrl}'), url('/img/EmptyImage.svg');
-                   display: inline-block; 
-                   font-size: 14px; 
-                   font-weight: 600; 
-                   color: rgb(255, 255, 255); 
-                   line-height: 16px; 
-                   vertical-align: top;">
-            <span class="blind">${cMark.name || "마크"}</span>
-          </span>
-        `.trim();
-      }
+      });
+    }
 
-      // [댓글의 sticker 표시]
-      let cStickerHtml = "";
-      if (c.sticker && c.sticker.filename && c.sticker.filename.length >= 4) {
-        const cStSub1 = c.sticker.filename.substring(0, 2);
-        const cStSub2 = c.sticker.filename.substring(2, 4);
-        let cStUrl = `/uploads/${cStSub1}/${cStSub2}/${c.sticker.filename}`;
-        if (c.sticker.imageType) {
-          cStUrl += `.${c.sticker.imageType}`;
-        }
-        cStickerHtml = `
-          <em class="css-18ro4ma e1877mpo0">
-            <img src="${cStUrl}" alt="sticker">
-          </em>
-        `.trim();
-      }
-
-      return `
-<li class="css-u1nrp7 e9nkex10">
-  <div class="css-uu8yq6 e3yf6l22">
-    <a class="css-16djw2l enx4swp0" href="/profile/${cUserId}" style="${cBg}">
-      <span class="blind">유저 썸네일</span>
-    </a>
-    <div class="css-1t19ptn ee2n3ac5">
-      <a href="/profile/${cUserId}">
-        ${cUserMarkHtml}${cUserName}
-      </a>
-      <em>${cDate}</em>
-    </div>
-    <div class="css-6wq60h e1i41bku1">
-      ${cHtml}
-    </div>
-    ${cStickerHtml}
-    <div class="css-1dcwahm e15ke9c50">
-      <em><a role="button" class="${cLikeClass}" data-comment-id="${c.id}">좋아요 ${cLike}</a></em>
-    </div>
-    <div class="css-13q8c66 e12alrlo2">
-      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
-        <span class="blind">더보기</span>
-      </a>
-      <div class="css-19v4su1 e12alrlo0">
-        <div class="css-3dlt5k ex7w8381">
-          <ul><li><a>신고하기</a></li></ul>
-          <span class="css-p2vmor ex7w8380"><i>&nbsp;</i></span>
-        </div>
-      </div>
-    </div>
-  </div>
-</li>
-      `.trim();
-    }).join("\n");
-
-    return `
-<li class="css-1psq3e8 eelonj20">
-  <div class="css-puqjcw e1877mpo2">
-    <a class="css-18bdrlk enx4swp0" href="/profile/${userId}" style="${bgStyle}">
-      <span class="blind">유저 썸네일</span>
-    </a>
-    <div class="css-1t19ptn ee2n3ac5">
-      <a href="/profile/${userId}">
-        ${userMarkHtml}${userName}
-      </a>
-      <em>${dateStr}</em>
-    </div>
-    <div class="css-6wq60h e1i41bku1">${contentHtml}</div>
-    ${stickerHtml}
-    <div class="css-1dcwahm e15ke9c50">
-      <em><a role="button" class="${likeClass}">좋아요 ${likeCount}</a></em>
-      <em><a role="button" class="reply">댓글 ${commentCount}</a></em>
-    </div>
-    <div class="css-13q8c66 e12alrlo2">
-      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
-        <span class="blind">더보기</span>
-      </a>
-      <div class="css-19v4su1 e12alrlo0">
-        <div class="css-3dlt5k ex7w8381">
-          <ul><li><a>신고하기</a></li></ul>
-          <span class="css-p2vmor ex7w8380"><i>&nbsp;</i></span>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div>
-    <div class="css-4e8bhg euhmxlr2">
-      <ul class="css-1e7cskh euhmxlr1">
-        ${commentLis}
-      </ul>
-      <div class="css-ahy3yn euhmxlr3">
-        <div class="css-1cyfuwa e1h77j9v12">
-          <div class="css-11v8s45 e1h77j9v1">
-            <textarea id="Write" name="Write" placeholder="댓글을 입력해 주세요" style="height: 22px !important;"></textarea>
-          </div>
-          <!-- [스티커 추가 시 여기 아래에 sticker-preview 영역 삽입] -->
-          <div class="css-fjfa6z e1h77j9v3" style="display: none;">
-            <em>
-              <img src="" alt="댓글 첨부 스티커" style="width: 105px; height: 105px;">
-              <a href="/" role="button" class="btn-close-sticker"><span class="blind">스티커 닫기</span></a>
-            </em>
-          </div>
-          <div class="css-ljggwk e1h77j9v9">
-            <div class="css-109f9np e1h77j9v7">
-              <!-- [스티커 관련 추가] 스티커 버튼 + 팝업 -->
-              <a role="button" class="css-1394o6u e1h77j9v5">
-                <span class="blind">스티커</span>
-              </a>
-              ${createStickerPopupHtml()}
-            </div>
-            <span class="css-11ofcmn e1h77j9v8">
-              <a href="/" data-btn-type="login" data-testid="button" class="css-1adjw8a e13821ld2">등록</a>
-            </span>
-          </div>
-        </div>
-        <a href="/" role="button" class="active css-rb1pwc euhmxlr0">답글 접기</a>
-      </div>
-    </div>
-  </div>
-</li>
-    `.trim();
-  }
-
-  /*************************************************
-   * [스티커 팝업 HTML] -> 여기서 fetchStickerSet(s) 호출 후 동적 삽입
-   *************************************************/
-  function createStickerPopupHtml() {
-    // 스티커 팝업을 표시할 기본 컨테이너
-    return `
-<div class="css-1viloiz e1h77j9v4" style="display: none;">
-  <!-- 실제로는 자바스크립트로 내부 내용(스티커 목록)을 동적 삽입 -->
-  <div id="stickerPopupInner" style="padding:8px;">
-    <p style="font-size:14px;">스티커 불러오는 중...</p>
-  </div>
-</div>
-    `.trim();
+    return li;
   }
 
   /**
- * [새로 추가] 여러 스티커 세트를 *병렬*로 불러오는 함수
- * (4개의 스티커 세트 ID 예시)
- */
+   * [추가] 여러 스티커 세트를 *병렬*로 불러오는 함수
+   */
   async function fetchAllStickerSets() {
     const csrf = requestOptions.headers["csrf-token"];
     const xtoken = requestOptions.headers["x-token"];
@@ -690,18 +512,31 @@ function startEntrystoryScript() {
     return results.filter(Boolean); // null/undefined 제외
   }
 
+  /**
+   * [스티커 팝업 HTML] -> 여기서 fetchStickerSet(s) 호출 후 동적 삽입
+   */
+  function createStickerPopupHtml() {
+    // 스티커 팝업을 표시할 기본 컨테이너
+    return `
+<div class="css-1viloiz e1h77j9v4" style="display: none;">
+  <!-- 실제로는 자바스크립트로 내부 내용(스티커 목록)을 동적 삽입 -->
+  <div id="stickerPopupInner" style="padding:8px;">
+    <p style="font-size:14px;">스티커 불러오는 중...</p>
+  </div>
+</div>
+    `.trim();
+  }
 
   /**
- * [수정됨] 스티커 목록을 4개 탭으로 나누어 표시,
- * 스티커 클릭 시 __selectedStickerId를 설정 + 미리보기 띄우기.
- */
+   * [추가] 스티커 목록 로딩/탭 UI 구성
+   */
   async function loadStickersIntoPopup(popupEl) {
     const allSets = await fetchAllStickerSets();
     if (!allSets || allSets.length === 0) {
       popupEl.innerHTML = `<p style="color:red">스티커 세트를 불러올 수 없습니다.</p>`;
       return;
     }
-  
+
     // (추가) 탭 아이콘 배열
     const tabIcons = [
       "/uploads/x3/bo/x3boffn0laut8eh811n2df90a1b5rwut.svg",
@@ -709,13 +544,11 @@ function startEntrystoryScript() {
       "/uploads/60/62/60625380lxx0i0xl001a1c9a956nhrlt.png",
       "/uploads/d4/2b/d42b92felxx0igbl0013c50459dubj7n.png"
     ];
-  
+
     let tabBtnsHtml = "";
     allSets.forEach((setData, idx) => {
       const isSelected = (idx === 0) ? `<span class="blind">선택됨</span>` : "";
       const safeTitle = setData.title || `Set${idx+1}`;
-
-      // ★ idx 범위를 초과하는 경우 대비해 아이콘은 일단 첫번째(0번)로 처리
       const iconUrl = tabIcons[idx] || tabIcons[0];
 
       tabBtnsHtml += `
@@ -729,7 +562,7 @@ function startEntrystoryScript() {
         </li>
       `;
     });
-  
+
     // --- 하단 탭별 이미지 목록 ---
     let tabsContentHtml = "";
     allSets.forEach((setData, idx) => {
@@ -852,165 +685,7 @@ function startEntrystoryScript() {
     });
   }
 
-  /**
-   * [댓글 닫힘] <li> DOM 생성
-   */
-  function makeCollapsedLi(item) {
-    const userId = item.user?.id || "";
-    const userName = item.user?.nickname || "NoName";
-    const dateStr = formatDate(item.created);
-    const likeCount = item.likesLength || 0;
-    const commentCount = item.commentsLength || 0;
-    const contentHtml = convertLinks(item.content || "");
-
-    let backgroundStyle = 'background-image: url("/img/EmptyImage.svg");';
-    const pf = item?.user?.profileImage;
-    if (pf && pf.filename && pf.filename.length >= 4) {
-      const sub1 = pf.filename.substring(0, 2);
-      const sub2 = pf.filename.substring(2, 4);
-      if (pf.imageType) {
-        backgroundStyle = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}.${pf.imageType}'), url('/img/EmptyImage.svg');`;
-      } else {
-        backgroundStyle = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}'), url('/img/EmptyImage.svg');`;
-      }
-    }
-
-    const htmlString = createCollapsedPostHTML(
-      item, backgroundStyle, contentHtml, dateStr, likeCount, commentCount, userId, userName
-    );
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = htmlString;
-    const li = tempDiv.firstElementChild; // <li>
-    li.__itemData = item;
-
-    // 이벤트 연결
-    // 1) 댓글 버튼 -> 펼침
-    const replyBtn = li.querySelector('.reply');
-    if (replyBtn) {
-      replyBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        fetchCommentsThenExpand(li);
-      });
-    }
-    // 2) 좋아요 버튼
-    const likeBtn = li.querySelector('.like');
-    if (likeBtn) {
-      likeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (item.isLike) {
-          // 이미 좋아요면 -> unlike
-          unlikeDiscuss(item.id, likeBtn, "discuss");
-        } else {
-          // 아니면 -> like
-          likeDiscuss(item.id, likeBtn, "discuss");
-        }
-      });
-    }
-
-    return li;
-  }
-
-  /**
- * [수정됨] 댓글 펼치기 시, 스티커 UI(`setupStickerUiEvents`)도 연결.
- * (기존 코드에서 추가/수정된 부분만 표시)
- */
-  async function fetchCommentsThenExpand(collapsedLi) {
-    const item = collapsedLi.__itemData;
-    const comments = await fetchComments(item.id);
-
-    // createExpandedPostHTML는 기존 로직대로 생성
-    const expandedHtml = createExpandedPostHTML(item, comments);
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = expandedHtml;
-    const expandedLi = tempDiv.firstElementChild;
-    expandedLi.__itemData = item;
-
-    // "답글 접기" 버튼 -> 닫힘상태 복귀
-    const closeBtn = expandedLi.querySelector('.css-rb1pwc.euhmxlr0');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        revertToCollapsed(expandedLi);
-      });
-    }
-    // 댓글버튼 -> 접기
-    const replyBtn2 = expandedLi.querySelector('.reply');
-    if (replyBtn2) {
-      replyBtn2.addEventListener('click', (e) => {
-        e.preventDefault();
-        revertToCollapsed(expandedLi);
-      });
-    }
-
-    // 글 좋아요
-    const likeBtn = expandedLi.querySelector('.like');
-    if (likeBtn) {
-      likeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (item.isLike) {
-          unlikeDiscuss(item.id, likeBtn, "discuss");
-        } else {
-          likeDiscuss(item.id, likeBtn, "discuss");
-        }
-      });
-    }
-
-    // 댓글 좋아요들
-    const commentLikeBtns = expandedLi.querySelectorAll('.css-u1nrp7 a.like');
-    commentLikeBtns.forEach((btnEl) => {
-      btnEl.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        const cId = btnEl.getAttribute('data-comment-id');
-        const cData = comments.find((c) => c.id === cId);
-        if (!cData) return;
-        if (cData.isLike) {
-          unlikeDiscuss(cData.id, btnEl, "comment", item.id);
-        } else {
-          likeDiscuss(cData.id, btnEl, "comment", item.id);
-        }
-      });
-    });
-
-    // [추가] 스티커 팝업 관련 이벤트 연결
-    setupStickerUiEvents(expandedLi);
-
-    // 댓글 등록 버튼 -> stickerId 포함 등록
-    const registerBtn = expandedLi.querySelector('a.css-1adjw8a.e13821ld2');
-    if (registerBtn) {
-      registerBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        const textarea = expandedLi.querySelector('textarea#Write');
-        if (!textarea) return;
-        const content = textarea.value.trim();
-
-        const stickerId = window.__selectedStickerId || null;
-        if (!content && !stickerId) {
-          alert("댓글 내용을 입력해 주세요 (또는 스티커만 등록 가능).");
-          return;
-        }
-        // createComment(discussId, content, stickerId)
-        createComment(item.id, content, stickerId).then(() => {
-          textarea.value = "";
-          resetStickerSelection(expandedLi);
-        });
-      });
-    }
-
-    collapsedLi.replaceWith(expandedLi);
-  }
-
-  /**
-   * "답글 접기" -> 다시 닫힘 상태로 교체
-   */
-  function revertToCollapsed(expandedLi) {
-    const item = expandedLi.__itemData;
-    const newCollapsed = makeCollapsedLi(item);
-    expandedLi.replaceWith(newCollapsed);
-  }
-
-  /**
-   * 댓글 Fetch
-   */
+  // 댓글 Fetch
   function fetchComments(discussId) {
     const csrf = requestOptions.headers["csrf-token"];
     const xtoken = requestOptions.headers["x-token"];
@@ -1116,11 +791,11 @@ function startEntrystoryScript() {
    * 3) 중복 체크용 signature (id만 사용)
    *************************************************/
   function createSignatureFromItem(item) {
-    return item.id; 
+    return item.id;
   }
 
   /*************************************************
-   * 4) 1초마다 새 글 / 기존 글 갱신
+   * 4) 1초마다 새 글 / 기존 글 갱신 + [추가] 열려있는 댓글도 갱신
    *************************************************/
   (function initTokensAndStart() {
     const { csrfToken, xToken } = getTokensFromDom();
@@ -1130,6 +805,7 @@ function startEntrystoryScript() {
     // 여기서 setInterval 반환값을 전역 변수(mainIntervalId)에 저장
     mainIntervalId = setInterval(async () => {
       try {
+        // 1) 게시글 목록 갱신
         const res = await fetch("https://playentry.org/graphql/SELECT_ENTRYSTORY", requestOptions);
         const json = await res.json();
         const discussList = json?.data?.discussList?.list || [];
@@ -1162,6 +838,15 @@ function startEntrystoryScript() {
       } catch (err) {
         // console.warn("GraphQL fetch error:", err);
       }
+
+      // [추가: 열려있는 댓글도 1초마다 갱신 (단, 작성 칸은 그대로 둠)]
+      const openCommentSections = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li .css-4e8bhg.euhmxlr2");
+      openCommentSections.forEach((section) => {
+        const li = section.closest('li');
+        if (li && li.__itemData && li.__itemData.id) {
+          refetchCommentsAndUpdate(li.__itemData.id);
+        }
+      });
     }, 1000);
   })();
 
@@ -1473,7 +1158,6 @@ function startEntrystoryScript() {
   background-repeat: no-repeat;
   vertical-align: middle;
 }
-/* [스티커 관련 추가] */
 .css-fjfa6z.e1h77j9v3 {
   margin-top: 10px;
 }
@@ -1504,18 +1188,6 @@ function startEntrystoryScript() {
 }
 .css-65blbf:hover {
   opacity: 1;
-}
-.css-1viloiz.e1h77j9v4 {
-  position: absolute;
-  top: 0;
-  left: 0;
-  margin-left: 40px;
-  width: 400px;
-  background: #fff;
-  border: 1px solid #16d8a3;
-  padding: 8px;
-  border-radius: 10px;
-  z-index: 999;
 }
 .css-16ih3f8 {
   overflow: hidden;
@@ -1664,12 +1336,6 @@ function startEntrystoryScript() {
   margin-left: -1px;
   vertical-align: middle;
   content: "";
-}
-.css-fjfa6z.e1h77j9v3 .btn-close-sticker {
-  display: inline-block;
-  margin-left: 5px;
-  color: #999;
-  vertical-align: middle;
 }
 .css-fjfa6z em > a {
   position: absolute;
@@ -1917,108 +1583,162 @@ function startEntrystoryScript() {
   }
 
   /*************************************************
-   * [추가] 댓글 재조회 -> 펼쳐진 상태만 업데이트
+   * [추가] "댓글 섹션(div)" HTML 생성 (본문 div는 건드리지 않음)
    *************************************************/
-  function refetchCommentsAndUpdate(discussId) {
-    return fetchComments(discussId).then((newComments) => {
-      const allLis = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li.css-1psq3e8.eelonj20");
-      let expandedLi = null;
-      allLis.forEach((li) => {
-        if (li.__itemData && li.__itemData.id === discussId) {
-          expandedLi = li;
+  function createCommentSectionHTML(item, commentsArray) {
+    // 댓글 목록 HTML
+    const commentLis = commentsArray.map((c) => {
+      const cUserId = c.user?.id || "";
+      const cUserName = c.user?.nickname || "NoName";
+      const cDate = formatDate(c.created);
+      const cHtml = convertLinks(c.content || "");
+      const cLike = c.likesLength || 0;
+      const cLikeClass = c.isLike ? "like active" : "like";
+
+      // 댓글 프로필 BG
+      let cBg = 'background-image: url("/img/EmptyImage.svg");';
+      const cPf = c?.user?.profileImage;
+      if (cPf && cPf.filename && cPf.filename.length >= 4) {
+        const ccSub1 = cPf.filename.substring(0, 2);
+        const ccSub2 = cPf.filename.substring(2, 4);
+        if (cPf.imageType) {
+          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}.${cPf.imageType}'), url('/img/EmptyImage.svg');`;
+        } else {
+          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}'), url('/img/EmptyImage.svg');`;
         }
-      });
-      if (!expandedLi) {
-        return;
       }
 
-      const item = expandedLi.__itemData;
-      const newHtml = createExpandedPostHTML(item, newComments);
-      const temp = document.createElement("div");
-      temp.innerHTML = newHtml;
-      const newExpandedLi = temp.firstElementChild;
-      newExpandedLi.__itemData = item;
-
-      const closeBtn = newExpandedLi.querySelector('.css-rb1pwc.euhmxlr0');
-      if (closeBtn) {
-        closeBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          revertToCollapsed(newExpandedLi);
-        });
-      }
-      const likeBtn = newExpandedLi.querySelector('.like');
-      if (likeBtn) {
-        likeBtn.addEventListener('click', (e) => {
-          e.preventDefault();
-          if (item.isLike) {
-            unlikeDiscuss(item.id, likeBtn, "discuss");
-          } else {
-            likeDiscuss(item.id, likeBtn, "discuss");
-          }
-        });
-      }
-      const commentLikeBtns = newExpandedLi.querySelectorAll('.css-u1nrp7 a.like');
-      commentLikeBtns.forEach((btnEl) => {
-        btnEl.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          const cId = btnEl.getAttribute('data-comment-id');
-          const cData = newComments.find((cc) => cc.id === cId);
-          if (!cData) return;
-          if (cData.isLike) {
-            unlikeDiscuss(cData.id, btnEl, "comment", item.id);
-          } else {
-            likeDiscuss(cData.id, btnEl, "comment", item.id);
-          }
-        });
-      });
-      const registerBtn = newExpandedLi.querySelector('a.css-1adjw8a.e13821ld2');
-      if (registerBtn) {
-        registerBtn.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          const textarea = newExpandedLi.querySelector('textarea#Write');
-          if (!textarea) return;
-          const content = textarea.value.trim();
-          const stickerId = window.__selectedStickerId || null;
-          if (!content && !stickerId) {
-            alert("댓글 내용을 입력해 주세요.");
-            return;
-          }
-          createComment(item.id, content, stickerId).then(() => {
-            textarea.value = "";
-            resetStickerSelection(newExpandedLi);
-          });
-        });
+      // [마크 표시 - 댓글 작성자]
+      let cUserMarkHtml = "";
+      const cMark = c?.user?.mark;
+      if (cMark && cMark.filename && cMark.filename.length >= 4) {
+        const cmSub1 = cMark.filename.substring(0, 2);
+        const cmSub2 = cMark.filename.substring(2, 4);
+        let cMarkUrl = `/uploads/${cmSub1}/${cmSub2}/${cMark.filename}`;
+        if (cMark.imageType) {
+          cMarkUrl += `.${cMark.imageType}`;
+        }
+        cUserMarkHtml = `
+          <span class="css-1b1jxqs ee2n3ac2"
+            style="background-image: url('${cMarkUrl}'), url('/img/EmptyImage.svg');
+                   display: inline-block; 
+                   font-size: 14px; 
+                   font-weight: 600; 
+                   color: rgb(255, 255, 255); 
+                   line-height: 16px; 
+                   vertical-align: top;">
+            <span class="blind">${cMark.name || "마크"}</span>
+          </span>
+        `.trim();
       }
 
-      setupStickerUiEvents(newExpandedLi, item);
-
-      const replyBtn2 = newExpandedLi.querySelector('.reply');
-      if (replyBtn2) {
-        replyBtn2.addEventListener('click', (e) => {
-          e.preventDefault();
-          revertToCollapsed(newExpandedLi);
-        });
+      // [댓글의 sticker 표시]
+      let cStickerHtml = "";
+      if (c.sticker && c.sticker.filename && c.sticker.filename.length >= 4) {
+        const cStSub1 = c.sticker.filename.substring(0, 2);
+        const cStSub2 = c.sticker.filename.substring(2, 4);
+        let cStUrl = `/uploads/${cStSub1}/${cStSub2}/${c.sticker.filename}`;
+        if (c.sticker.imageType) {
+          cStUrl += `.${c.sticker.imageType}`;
+        }
+        cStickerHtml = `
+          <em class="css-18ro4ma e1877mpo0">
+            <img src="${cStUrl}" alt="sticker" style="width: 74px; height: 74px;">
+          </em>
+        `.trim();
       }
 
-      expandedLi.replaceWith(newExpandedLi);
-    });
+      return `
+<li class="css-u1nrp7 e9nkex10">
+  <div class="css-uu8yq6 e3yf6l22">
+    <a class="css-16djw2l enx4swp0" href="/profile/${cUserId}" style="${cBg}">
+      <span class="blind">유저 썸네일</span>
+    </a>
+    <div class="css-1t19ptn ee2n3ac5">
+      <a href="/profile/${cUserId}">
+        ${cUserMarkHtml}${cUserName}
+      </a>
+      <em>${cDate}</em>
+    </div>
+    <div class="css-6wq60h e1i41bku1">
+      ${cHtml}
+    </div>
+    ${cStickerHtml}
+    <div class="css-1dcwahm e15ke9c50">
+      <em><a role="button" class="${cLikeClass}" data-comment-id="${c.id}">좋아요 ${cLike}</a></em>
+    </div>
+    <div class="css-13q8c66 e12alrlo2">
+      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
+        <span class="blind">더보기</span>
+      </a>
+      <div class="css-19v4su1 e12alrlo0">
+        <div class="css-3dlt5k ex7w8381">
+          <ul><li><a>신고하기</a></li></ul>
+          <span class="css-p2vmor ex7w8380"><i>&nbsp;</i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</li>
+      `.trim();
+    }).join("");
+
+    // 전체 댓글 섹션
+    return `
+<div class="css-4e8bhg euhmxlr2">
+  <ul class="css-1e7cskh euhmxlr1">
+    ${commentLis}
+  </ul>
+  <div class="css-ahy3yn euhmxlr3">
+    <div class="css-1cyfuwa e1h77j9v12">
+      <div class="css-11v8s45 e1h77j9v1">
+        <textarea id="Write" name="Write" placeholder="댓글을 입력해 주세요" style="height: 22px !important;"></textarea>
+      </div>
+      <!-- 스티커 미리보기 영역 -->
+      <div class="css-fjfa6z e1h77j9v3" style="display: none;">
+        <em>
+          <img src="" alt="댓글 첨부 스티커" style="width: 105px; height: 105px;">
+          <a href="/" role="button" class="btn-close-sticker">
+            <span class="blind">스티커 닫기</span>
+          </a>
+        </em>
+      </div>
+      <div class="css-ljggwk e1h77j9v9">
+        <div class="css-109f9np e1h77j9v7">
+          <!-- 스티커 버튼 + 팝업 -->
+          <a role="button" class="css-1394o6u e1h77j9v5">
+            <span class="blind">스티커</span>
+          </a>
+          ${createStickerPopupHtml()}
+        </div>
+        <span class="css-11ofcmn e1h77j9v8">
+          <a href="/" data-btn-type="login" data-testid="button"
+             class="css-1adjw8a e13821ld2">등록</a>
+        </span>
+      </div>
+    </div>
+    <a href="/" role="button" class="active css-rb1pwc euhmxlr0">
+      답글 접기
+    </a>
+  </div>
+</div>
+    `.trim();
   }
 
   /**
- * [새로 추가/수정] 펼쳐진 댓글영역에서
- * 스티커 팝업 열기/닫기 + loadStickersIntoPopup() 호출
- */
-  function setupStickerUiEvents(expandedLi) {
+   * [추가] 스티커 팝업 열기/닫기, 선택 미리보기 등의 이벤트
+   *        "댓글 섹션 컨테이너"를 기준으로 연결
+   */
+  function setupStickerUiEvents(container) {
     // 팝업 박스
-    const popup = expandedLi.querySelector('.css-1viloiz.e1h77j9v4');
+    const popup = container.querySelector('.css-1viloiz.e1h77j9v4');
     // 스티커 버튼
-    const stickerBtn = expandedLi.querySelector('.css-1394o6u.e1h77j9v5');
+    const stickerBtn = container.querySelector('.css-1394o6u.e1h77j9v5');
     if (stickerBtn && popup) {
       stickerBtn.addEventListener('click', async (e) => {
         e.preventDefault();
         if (popup.style.display === 'none') {
           popup.style.display = 'block';
-          // 실제 스티커 목록을 불러와 탭 UI 생성
           const innerDiv = popup.querySelector('#stickerPopupInner');
           if (innerDiv) {
             innerDiv.innerHTML = `<p style="font-size:14px;">스티커 로딩중...</p>`;
@@ -2031,18 +1751,18 @@ function startEntrystoryScript() {
     }
 
     // '스티커 닫기' 버튼
-    const closeStickerBtn = expandedLi.querySelector('.css-fjfa6z.e1h77j9v3 .btn-close-sticker');
+    const closeStickerBtn = container.querySelector('.btn-close-sticker');
     if (closeStickerBtn) {
       closeStickerBtn.addEventListener('click', (ev) => {
         ev.preventDefault();
-        resetStickerSelection(expandedLi);
+        resetStickerSelection(container);
       });
     }
   }
 
-  function resetStickerSelection(expandedLi) {
+  function resetStickerSelection(container) {
     window.__selectedStickerId = null;
-    const preview = expandedLi.querySelector('.css-fjfa6z.e1h77j9v3');
+    const preview = container.querySelector('.css-fjfa6z.e1h77j9v3');
     if (preview) {
       preview.style.display = 'none';
       const pvImg = preview.querySelector('img');
@@ -2052,19 +1772,238 @@ function startEntrystoryScript() {
     }
   }
 
-  /*************************************************
-   * [추가] 화면에 있는 글(li) 중 해당 item.id인 것 갱신 (본문 + sticker + 좋아요/댓글)
-   *************************************************/
+  /**
+   * 댓글 펼치기 -> <li> 내부에 "댓글 섹션(div)"만 추가
+   */
+  async function fetchCommentsThenExpand(collapsedLi) {
+    const item = collapsedLi.__itemData;
+    const comments = await fetchComments(item.id);
+
+    // 새 댓글 섹션
+    const html = createCommentSectionHTML(item, comments);
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    const commentSection = tempDiv.firstElementChild; // <div class="css-4e8bhg.euhmxlr2">
+
+    // "답글 접기" 버튼
+    const closeBtn = commentSection.querySelector('.css-rb1pwc.euhmxlr0');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        revertToCollapsed(collapsedLi);
+      });
+    }
+
+    // 댓글 좋아요
+    const commentLikeBtns = commentSection.querySelectorAll('a.like[data-comment-id]');
+    commentLikeBtns.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const cId = btn.getAttribute('data-comment-id');
+        const cData = comments.find(cc => cc.id === cId);
+        if (!cData) return;
+        if (cData.isLike) {
+          unlikeDiscuss(cData.id, btn, "comment", item.id);
+        } else {
+          likeDiscuss(cData.id, btn, "comment", item.id);
+        }
+      });
+    });
+
+    // 스티커 팝업 이벤트 등
+    setupStickerUiEvents(commentSection);
+
+    // 댓글 등록 버튼
+    const registerBtn = commentSection.querySelector('a.css-1adjw8a.e13821ld2');
+    if (registerBtn) {
+      registerBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const textarea = commentSection.querySelector('textarea#Write');
+        if (!textarea) return;
+        const content = textarea.value.trim();
+        const stickerId = window.__selectedStickerId || null;
+        if (!content && !stickerId) {
+          alert("댓글 내용을 입력해 주세요 (또는 스티커만 등록 가능).");
+          return;
+        }
+        createComment(item.id, content, stickerId).then(() => {
+          textarea.value = "";
+          resetStickerSelection(commentSection);
+        });
+      });
+    }
+
+    // <li>에 삽입
+    collapsedLi.appendChild(commentSection);
+  }
+
+  /**
+   * "답글 접기" -> 댓글 섹션 div만 제거
+   */
+  function revertToCollapsed(li) {
+    // 댓글 섹션(= .css-4e8bhg.euhmxlr2)만 제거
+    const commentSection = li.querySelector('.css-4e8bhg.euhmxlr2');
+    if (commentSection) {
+      commentSection.remove();
+    }
+  }
+
+  /**
+   * [수정] 댓글 재조회 -> **"댓글 작성 칸"은 그대로 두고** "댓글 목록"만 새로고침
+   */
+  function refetchCommentsAndUpdate(discussId) {
+    return fetchComments(discussId).then((newComments) => {
+      // 1) 해당 글(li)을 찾는다
+      const allLis = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li");
+      let targetLi = null;
+      allLis.forEach((li) => {
+        if (li.__itemData && li.__itemData.id === discussId) {
+          targetLi = li;
+        }
+      });
+      if (!targetLi) {
+        return;
+      }
+
+      // 2) 이미 "펼쳐진" 상태가 아니라면 종료
+      const commentSection = targetLi.querySelector('.css-4e8bhg.euhmxlr2');
+      if (!commentSection) {
+        return;
+      }
+
+      // [핵심] ★ 댓글 작성 textarea는 그대로 두고, <ul>만 새로고침
+      const commentUl = commentSection.querySelector('.css-1e7cskh.euhmxlr1');
+      if (!commentUl) {
+        return;
+      }
+      // "새로운 댓글 li" HTML만 구성
+      const newCommentLisHtml = newComments.map((c) => {
+        const cUserId = c.user?.id || "";
+        const cUserName = c.user?.nickname || "NoName";
+        const cDate = formatDate(c.created);
+        const cHtml = convertLinks(c.content || "");
+        const cLike = c.likesLength || 0;
+        const cLikeClass = c.isLike ? "like active" : "like";
+
+        let cBg = 'background-image: url("/img/EmptyImage.svg");';
+        const cPf = c?.user?.profileImage;
+        if (cPf && cPf.filename && cPf.filename.length >= 4) {
+          const ccSub1 = cPf.filename.substring(0, 2);
+          const ccSub2 = cPf.filename.substring(2, 4);
+          if (cPf.imageType) {
+            cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}.${cPf.imageType}'), url('/img/EmptyImage.svg');`;
+          } else {
+            cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}'), url('/img/EmptyImage.svg');`;
+          }
+        }
+
+        let cUserMarkHtml = "";
+        const cMark = c?.user?.mark;
+        if (cMark && cMark.filename && cMark.filename.length >= 4) {
+          const cmSub1 = cMark.filename.substring(0, 2);
+          const cmSub2 = cMark.filename.substring(2, 4);
+          let cMarkUrl = `/uploads/${cmSub1}/${cmSub2}/${cMark.filename}`;
+          if (cMark.imageType) {
+            cMarkUrl += `.${cMark.imageType}`;
+          }
+          cUserMarkHtml = `
+            <span class="css-1b1jxqs ee2n3ac2"
+              style="background-image: url('${cMarkUrl}'), url('/img/EmptyImage.svg');
+                     display: inline-block; 
+                     font-size: 14px; 
+                     font-weight: 600; 
+                     color: rgb(255, 255, 255); 
+                     line-height: 16px; 
+                     vertical-align: top;">
+              <span class="blind">${cMark.name || "마크"}</span>
+            </span>
+          `.trim();
+        }
+
+        let cStickerHtml = "";
+        if (c.sticker && c.sticker.filename && c.sticker.filename.length >= 4) {
+          const cStSub1 = c.sticker.filename.substring(0, 2);
+          const cStSub2 = c.sticker.filename.substring(2, 4);
+          let cStUrl = `/uploads/${cStSub1}/${cStSub2}/${c.sticker.filename}`;
+          if (c.sticker.imageType) {
+            cStUrl += `.${c.sticker.imageType}`;
+          }
+          cStickerHtml = `
+            <em class="css-18ro4ma e1877mpo0">
+              <img src="${cStUrl}" alt="sticker" style="width: 74px; height: 74px;">
+            </em>
+          `.trim();
+        }
+
+        return `
+<li class="css-u1nrp7 e9nkex10">
+  <div class="css-uu8yq6 e3yf6l22">
+    <a class="css-16djw2l enx4swp0" href="/profile/${cUserId}" style="${cBg}">
+      <span class="blind">유저 썸네일</span>
+    </a>
+    <div class="css-1t19ptn ee2n3ac5">
+      <a href="/profile/${cUserId}">
+        ${cUserMarkHtml}${cUserName}
+      </a>
+      <em>${cDate}</em>
+    </div>
+    <div class="css-6wq60h e1i41bku1">
+      ${cHtml}
+    </div>
+    ${cStickerHtml}
+    <div class="css-1dcwahm e15ke9c50">
+      <em><a role="button" class="${cLikeClass}" data-comment-id="${c.id}">좋아요 ${cLike}</a></em>
+    </div>
+    <div class="css-13q8c66 e12alrlo2">
+      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
+        <span class="blind">더보기</span>
+      </a>
+      <div class="css-19v4su1 e12alrlo0">
+        <div class="css-3dlt5k ex7w8381">
+          <ul><li><a>신고하기</a></li></ul>
+          <span class="css-p2vmor ex7w8380"><i>&nbsp;</i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</li>
+        `.trim();
+      }).join("");
+
+      // (a) 기존 UL 비우고 새 li들 반영
+      commentUl.innerHTML = newCommentLisHtml;
+
+      // (b) 새롭게 생긴 ‘좋아요’ 버튼들에 이벤트 다시 연결
+      const newLikeBtns = commentUl.querySelectorAll('a.like[data-comment-id]');
+      newLikeBtns.forEach((btnEl) => {
+        const cId = btnEl.getAttribute('data-comment-id');
+        const cData = newComments.find((cc) => cc.id === cId);
+        btnEl.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          if (!cData) return;
+          if (cData.isLike) {
+            unlikeDiscuss(cData.id, btnEl, "comment", discussId);
+          } else {
+            likeDiscuss(cData.id, btnEl, "comment", discussId);
+          }
+        });
+      });
+    });
+  }
+
+  /**
+   * [추가] 화면에 있는 글(li) 중 해당 item.id인 것 갱신
+   */
   function updateDiscussItemInDom(updatedItem) {
     const allLis = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li");
     allLis.forEach((li) => {
       if (!li.__itemData) return;
       if (li.__itemData.id === updatedItem.id) {
-        // 1) 좋아요/댓글 수, isLike
+        // 1) 좋아요/댓글 수, isLike 갱신 (기존 그대로)
         li.__itemData.likesLength = updatedItem.likesLength;
         li.__itemData.commentsLength = updatedItem.commentsLength;
         li.__itemData.isLike = updatedItem.isLike;
-
+  
         const likeA = li.querySelector("a.like");
         if (likeA) {
           likeA.textContent = `좋아요 ${updatedItem.likesLength}`;
@@ -2078,50 +2017,55 @@ function startEntrystoryScript() {
         if (replyA) {
           replyA.textContent = `댓글 ${updatedItem.commentsLength}`;
         }
-
-        // 2) 글 내용(content) 업데이트
-        li.__itemData.content = updatedItem.content; // 데이터 동기화
-        const contentDiv = li.querySelector(".css-6wq60h.e1i41bku1");
-        if (contentDiv) {
-          contentDiv.innerHTML = convertLinks(updatedItem.content || "");
-        }
-
-        // 3) 스티커도 갱신(기존 있으면 삭제 후, 새로 생성)
-        li.__itemData.sticker = updatedItem.sticker;
-        const oldStickerEl = li.querySelector("em.css-18ro4ma.e1877mpo0");
-        if (oldStickerEl) {
-          oldStickerEl.remove();
-        }
-        if (
-          updatedItem.sticker &&
-          updatedItem.sticker.filename &&
-          updatedItem.sticker.filename.length >= 4
-        ) {
-          const stSub1 = updatedItem.sticker.filename.substring(0, 2);
-          const stSub2 = updatedItem.sticker.filename.substring(2, 4);
-          let stUrl = `/uploads/${stSub1}/${stSub2}/${updatedItem.sticker.filename}`;
-          if (updatedItem.sticker.imageType) {
-            stUrl += `.${updatedItem.sticker.imageType}`;
-          }
-
-          const newStickerHtml = `
-            <em class="css-18ro4ma e1877mpo0">
-              <img src="${stUrl}" alt="sticker">
-            </em>
-          `.trim();
-
-          // contentDiv 바로 뒤에 삽입
+  
+        // 2) 글 내용(content) 갱신 (기존 그대로)
+        if (li.__itemData.content !== updatedItem.content) {
+          li.__itemData.content = updatedItem.content;
+          const contentDiv = li.querySelector(".css-6wq60h.e1i41bku1");
           if (contentDiv) {
-            contentDiv.insertAdjacentHTML("afterend", newStickerHtml);
+            contentDiv.innerHTML = convertLinks(updatedItem.content || "");
           }
+        }
+  
+        // 3) [수정 핵심] 스티커 부분만 "실제 변경 시"에만 DOM 업데이트
+        const oldSticker = li.__itemData.sticker;
+        const newSticker = updatedItem.sticker;
+  
+        const oldStr = oldSticker ? JSON.stringify(oldSticker) : "";
+        const newStr = newSticker ? JSON.stringify(newSticker) : "";
+  
+        if (oldStr !== newStr) {
+          // (1) 기존 스티커 DOM 제거
+          const oldStickerEl = li.querySelector("em.css-18ro4ma.e1877mpo0");
+          if (oldStickerEl) {
+            oldStickerEl.remove();
+          }
+  
+          // (2) 새 스티커 있으면 추가
+          if (newSticker && newSticker.filename && newSticker.filename.length >= 4) {
+            const stSub1 = newSticker.filename.substring(0, 2);
+            const stSub2 = newSticker.filename.substring(2, 4);
+            let stUrl = `/uploads/${stSub1}/${stSub2}/${newSticker.filename}`;
+            if (newSticker.imageType) {
+              stUrl += `.${newSticker.imageType}`;
+            }
+            const newStickerHtml = `
+              <em class="css-18ro4ma e1877mpo0">
+                <img src="${stUrl}" alt="sticker">
+              </em>
+            `.trim();
+  
+            const contentDiv = li.querySelector(".css-6wq60h.e1i41bku1");
+            if (contentDiv) {
+              contentDiv.insertAdjacentHTML("afterend", newStickerHtml);
+            }
+          }
+          // (3) itemData에도 새 sticker 적용
+          li.__itemData.sticker = newSticker;
         }
       }
     });
   }
-
-  /*************************************************
-   * [원본 코드 끝]
-   *************************************************/
 }
 
 /*******************************************************************
