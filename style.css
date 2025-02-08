@@ -1,0 +1,684 @@
+.css-1psq3e8 {
+    margin-top: 18px;
+    background-color: #fff;
+    border-radius: 20px;
+    box-shadow: rgba(0, 0, 0, 0.06) 0px 1px 1px 0px;
+  }
+  .css-18bdrlk {
+    overflow: hidden;
+    position: absolute;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: 50% 50%;
+    left: 27px;
+    top: 27px;
+    width: 50px;
+    height: 50px;
+  }
+  .css-1t19ptn {
+    margin-top: 8px;
+  }
+  .css-1t19ptn a {
+    display: inline-block;
+    font-size: 14px;
+    font-weight: 600;
+    color: #000;
+    line-height: 16px;
+    vertical-align: top;
+  }
+  .css-1e7cskh {
+    border-top: 1px solid rgb(233, 233, 233);
+    border-radius: 0 0 20px 20px;
+  }
+  .css-ahy3yn {
+    padding: 27px;
+    background-color: rgb(250, 250, 250);
+    border-top: 1px solid rgb(233, 233, 233);
+    border-radius: 0 0 20px 20px;
+    position: relative;
+    z-index: 20;
+  }
+  .css-u1nrp7:first-of-type {
+    border-top: 0;
+  }
+  .css-u1nrp7 {
+    margin: 0 27px;
+    border-top: 1px solid rgb(233, 233, 233);
+  }
+  .css-uu8yq6.e3yf6l22 {
+    padding-left: 48px;
+  }
+  .css-u1nrp7 .enx4swp0 {
+    width: 30px;
+    height: 30px;
+    left: 0;
+  }
+  .css-16djw2l {
+    overflow: hidden;
+    position: absolute;
+    border-radius: 50%;
+    background-size: cover;
+    background-position: 50% 50%;
+    top: 27px;
+    width: 30px;
+    height: 30px;
+    left: 0;
+  }
+  .css-u1nrp7 .ee2n3ac5 {
+    margin-top: 0;
+  }
+  .css-u1nrp7 .e1i41bku1 {
+    margin-top: 9px;
+  }
+  .css-6wq60h {
+    overflow: hidden;
+    margin-top: 7px;
+    font-size: 16px;
+    color: rgb(44, 49, 61);
+    line-height: 22px;
+    word-break: break-word;
+  }
+  .blind {
+    overflow: hidden;
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin: -1px;
+    padding: 0;
+    width: 1px;
+    height: 1px;
+    border: 0;
+    clip: rect(0, 0, 0, 0);
+  }
+  .css-16djw2l::after {
+    position: absolute;
+    inset: 0;
+    border: 1px solid rgba(0, 0, 0, 0.01);
+    border-radius: 50%;
+    content: "";
+  }
+  .css-1dcwahm {
+    margin-top: 18px;
+    height: 12px;
+  }
+  .css-1dcwahm em {
+    display: inline-block;
+    margin-left: 18px;
+    vertical-align: top;
+  }
+  .css-1dcwahm em:first-of-type {
+    margin-left: 0;
+  }
+  .css-1dcwahm a {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgb(151, 151, 151);
+    line-height: 12px;
+    transition: color 0.3s;
+    vertical-align: top;
+  }
+  .css-1dcwahm a.like::before {
+    width: 14px;
+    background-image: url(/img/IcoCmtLike.svg);
+    background-size: 14px;
+  }
+  .css-1dcwahm a.active {
+    color: rgb(22, 216, 163) !important;
+  }
+  .css-1dcwahm a::before {
+    display: inline-block;
+    height: 12px;
+    margin: -1px 9px 0 0;
+    transition: background-image 0.3s;
+    vertical-align: top;
+    content: "";
+  }
+  .css-13q8c66 {
+    position: absolute;
+    right: 10px;
+    top: 16px;
+    width: 40px;
+    height: 40px;
+  }
+  .css-9ktsbr {
+    position: absolute;
+    width: 40px;
+    height: 40px;
+    overflow: hidden;
+    border-radius: 50%;
+  }
+  /* 기본은 css-19v4su1로, display:none */
+  .css-19v4su1 {
+    display: none;
+    position: absolute;
+    left: 33%;
+    top: 59px;
+    width: 98px;
+    margin-left: -43px;
+    z-index: 50;
+  }
+  /* 토글 후 표시용 css-16el6fj */
+  .css-16el6fj {
+    display: block;
+    position: absolute;
+    left: 33%;
+    top: 59px;
+    width: 98px;
+    margin-left: -43px;
+    z-index: 50;
+  }
+  .css-9ktsbr::before {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 4px;
+    height: 18px;
+    z-index: 10;
+    content: "";
+    margin: -9px 0 0 -2px;
+    background: url(/img/IcoButtonMore.svg) 0 0 / 4px no-repeat;
+  }
+  .css-9ktsbr::after {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.06);
+    transform: scale(0);
+    transition: transform 0.3s;
+    z-index: 1;
+    content: "";
+  }
+  .css-1cyfuwa {
+    position: relative;
+    padding: 24px 27px 18px;
+    border-radius: 10px;
+    background-color: #fff;
+    z-index: 30;
+    border: 1px solid rgb(226, 226, 226);
+  }
+  .css-rb1pwc {
+    display: block;
+    height: 50px;
+    margin: 14px -27px -27px;
+    border-radius: 0 0 20px 20px;
+    border-top: 1px solid rgb(233, 233, 233);
+    background-color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgb(151, 151, 151);
+    text-align: center;
+    line-height: 50px;
+  }
+  .css-11v8s45 {
+    min-height: 44px;
+  }
+  .css-ljggwk {
+    margin-top: 17px;
+  }
+  .css-1cyfuwa textarea {
+    resize: none;
+    width: 100%;
+    height: 44px;
+    max-height: 88px;
+    border: 0;
+    outline: none;
+    font-size: 16px;
+    color: #000;
+    vertical-align: top;
+    line-height: 22px;
+  }
+  .css-109f9np {
+    float: left;
+    position: relative;
+    padding-top: 14px;
+  }
+  .css-1394o6u {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    background-image: url(/img/IcoCmtSticker.svg);
+    background-size: 20px;
+    vertical-align: top;
+    transition: background-image 0.3s;
+  }
+  .css-ljggwk::after {
+    display: block;
+    clear: both;
+    content: "";
+  }
+  .css-11ofcmn {
+    float: right;
+    width: 110px;
+  }
+  .css-1adjw8a {
+    display: block;
+    overflow: hidden;
+    box-sizing: border-box;
+    height: 34px;
+    border-radius: 17px;
+    border: 1px solid rgb(22, 216, 163);
+    font-size: 14px;
+    font-weight: 600;
+    text-align: center;
+    transition: 0.3s;
+    line-height: 34px;
+    background-color: rgb(22, 216, 163);
+    color: #fff;
+  }
+  .css-4e8bhg {
+    background-color: rgb(250, 250, 250);
+    border-radius: 0px 0px 20px 20px;
+  }
+  .css-uu8yq6 {
+    position: relative;
+    padding: 27px 73px 27px 48px;
+  }
+  .css-u1nrp7 .ee2n3ac5 em {
+    display: inline;
+    padding-left: 9px;
+    line-height: 16px;
+    vertical-align: top;
+  }
+  .css-rb1pwc::after {
+      display: inline-block;
+      width: 10px;
+      height: 6px;
+      vertical-align: top;
+      content: "";
+      margin: 22px 0px 0px 9px;
+      background: url(/img/IconReplyMoreButton.svg) 0% 0% / 10px no-repeat;
+  }
+  .css-rb1pwc.active::after {
+      transform: rotate(180deg);
+  }
+  .css-18ro4ma img {
+    display: block;
+    max-width: 74px;
+    max-height: 74px;
+  }
+  .css-1b1jxqs {
+    display: inline-block;
+    width: 20px;
+    height: 18px;
+    margin-right: 4px;
+    background-size: auto 18px;
+    background-position: 50% 50%;
+    background-repeat: no-repeat;
+    vertical-align: middle;
+  }
+  .css-fjfa6z.e1h77j9v3 {
+    margin-top: 10px;
+  }
+  .css-fjfa6z.e1h77j9v3 img {
+    border: 1px solid #eee;
+    border-radius: 10px;
+  }
+  .css-fjfa6z.e1h77j9v3 .btn-close-sticker {
+    display: inline-block;
+    margin-left: 5px;
+    color: #999;
+    vertical-align: middle;
+  }
+  .css-1viloiz.e1h77j9v4 {
+    position: absolute;
+    /* top: 0; */
+    /* left: 0; */
+    /* margin-left: 40px; */
+    /* width: 0px; */
+    /* background: #fff; */
+    /* border: 1px solid #16d8a3; */
+    /* padding: 8px; */
+    border-radius: 10px;
+    z-index: 999;
+  }
+  .css-65blbf {
+    opacity: 0.7;
+  }
+  .css-65blbf:hover {
+    opacity: 1;
+  }
+  .css-16ih3f8 {
+    overflow: hidden;
+    display: block;
+    position: relative;
+    width: 358px;
+    height: 278px;
+    padding: 0px;
+    border: 1px solid rgb(22, 216, 163);
+    border-radius: 10px;
+    background-color: rgb(255, 255, 255);
+    box-shadow: rgba(0, 0, 0, 0.06) 0px 1px 1px 0px;
+    z-index: 20;
+  }
+  .css-zcg0zv {
+    position: relative;
+    padding: 0px 55px;
+  }
+  .css-anbigi {
+    overflow-y: auto;
+    height: calc(100% - 57px);
+    padding: 18px 0px 0px 18px;
+  }
+  .css-anbigi > ul {
+    overflow: hidden;
+    margin: -18px 0px 0px -41px;
+    padding-bottom: 18px;
+  }
+  .css-anbigi > ul > li {
+    float: left;
+    margin: 18px 0px 0px 41px;
+  }
+  .css-anbigi > ul > li > span {
+    display: block;
+    position: relative;
+    hight: auto;
+    width: auto;
+    padding: 0px;
+    transition: opacity 0.1s ease 0s;
+    cursor: pointer;
+  }
+  .css-anbigi > ul > li > span::before {
+    display: inline-block;
+    width: 1px;
+    height: 100%;
+    margin-left: -1px;
+    vertical-align: middle;
+    content: "";
+  }
+  .css-xq7ycv {
+    white-space: nowrap;
+  }
+  .css-zcg0zv {
+    position: relative;
+    padding: 0px 55px;
+  }
+  .css-65blbf {
+    position: absolute;
+    top: 0px;
+    z-index: 1;
+    width: 55px;
+    height: 100%;
+    padding: 0px 9px;
+    box-sizing: border-box;
+  }
+  .css-1nidk14 {
+    display: inline-block;
+    position: relative;
+    vertical-align: top;
+  }
+  .css-anbigi > ul > li > span > img {
+      max-width: 74px;
+      max-height: 74px;
+  }
+  .css-65blbf.btn_prev {
+    left: 0px;
+  }
+  .css-65blbf svg {
+    position: relative;
+    margin-top: 2px;
+  }
+  .css-65blbf.btn_next {
+    right: 0px;
+  }
+  .css-65blbf.btn_next svg {
+    transform: rotate(180deg);
+  }
+  .css-anbigi > ul:hover > li > span {
+    opacity: 0.3;
+  }
+  .css-anbigi > ul:hover > li:hover > span {
+    opacity: 1;
+  }
+  .css-65blbf.flicking-arrow-disabled svg circle, .css-65blbf:disabled svg circle {
+    stroke: rgb(226, 226, 226);
+  }
+  .css-65blbf.flicking-arrow-disabled svg path, .css-65blbf:disabled svg path {
+      fill: rgb(203, 203, 203);
+  }
+  /* [기본] 탭 li의 밑줄은 연한 회색 */
+  .css-1nidk14::before {
+    display: block;
+    position: absolute;
+    bottom: 0px;
+    width: 100%;
+    height: 1.5px;
+    background-color: rgb(229, 230, 230);
+    content: "";
+  }
+  
+  /* [활성] 탭 li가 .active일 때만 초록색 */
+  .css-1nidk14.active::before {
+    background-color: rgb(22, 216, 163);
+  }
+  .css-zcg0zv::before {
+      display: block;
+      position: absolute;
+      bottom: 0px;
+      right: 0px;
+      left: 0px;
+      height: 1.5px;
+      background-color: rgb(229, 230, 230);
+      content: "";
+  }
+  .css-fjfa6z.e1h77j9v3 img {
+    border: 1px solid #eee;
+    border-radius: 10px;
+  }
+  .css-fjfa6z em {
+    display: block;
+    position: relative;
+    width: 66px;
+    height: 66px;
+    background-color: rgb(255, 255, 255);
+    text-align: center;
+    border-width: 1px;
+    border-style: solid;
+    border-color: rgb(226, 226, 226);
+    border-image: initial;
+    border-radius: 10px;
+  }
+  .css-fjfa6z em::before {
+    display: inline-block;
+    width: 1px;
+    height: 100%;
+    margin-left: -1px;
+    vertical-align: middle;
+    content: "";
+  }
+  .css-fjfa6z em > a {
+    position: absolute;
+    right: -11px;
+    top: -11px;
+    width: 22px;
+    height: 22px;
+    content: "";
+    background: url(/img/IcoStickerClose.svg) 0% 0% / 22px no-repeat;
+  }
+  .css-fjfa6z em img {
+    display: inline-block;
+    max-width: 46px;
+    max-height: 46px;
+    vertical-align: middle;
+  }
+  
+  /* [추가] avatar가 같을 때 .css-1kivsx6 배경 표시 */
+  .css-1kivsx6 {
+    margin-top: 18px;
+    background-color: rgb(231, 251, 246);
+    border-radius: 20px;
+    box-shadow: rgba(0, 0, 0, 0.06) 0px 1px 1px 0px;
+  }
+  .css-9ktsbr:hover::after, .css-9ktsbr.active::after {
+    transform: scale(1);
+  }
+  .css-1v3ka1a {
+    display: block;
+    position: relative;
+    padding: 18px 0px;
+    background-color: rgb(255, 255, 255);
+    border: 1px solid rgb(233, 233, 233);
+    border-radius: 15px;
+    box-shadow: rgba(0, 0, 0, 0.06) 0px 1px 1px 0px;
+    z-index: 20;
+  }
+  .css-1s3ybmc {
+    overflow: hidden;
+    position: absolute;
+    left: 50%;
+    bottom: 100%;
+    width: 24px;
+    height: 16px;
+    margin-left: -12px;
+    font-size: 0px;
+  }
+  .css-6zwuwq {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    width: 600px;
+    min-height: 480px;
+    transform: translate(-50%, -50%);
+    z-index: 200;
+}
+.css-su85lg {
+  position: relative;
+  border: 1px solid rgb(233, 233, 233);
+  border-radius: 20px;
+  background-color: rgb(255, 255, 255);
+  box-shadow: rgba(0, 0, 0, 0.06) 0px 1px 1px 0px;
+}
+.css-g2sts3 {
+  padding: 54px 30px 9px;
+}
+.css-198mr1i {
+  margin-top: 27px;
+  text-align: center;
+  padding-bottom: 54px;
+}
+.css-1rsy03z {
+  padding: 0px 0px 9px;
+}
+.css-1rsy03z::before {
+  display: block;
+  width: 152px;
+  height: 152px;
+  content: "";
+  overflow: hidden;
+  margin: 0px auto 18px;
+  border-radius: 50%;
+  background: url(/img/ImgReportThmb.svg) 0% 0% / 152px no-repeat;
+}
+.css-14c2cg {
+  display: block;
+  font-size: 24px;
+  font-weight: 600;
+  color: rgb(0, 0, 0);
+  text-align: center;
+  line-height: 26px;
+}
+.css-1rsy03z p {
+  margin-top: 18px;
+  font-size: 16px;
+  color: rgb(44, 49, 61);
+  text-align: center;
+  line-height: 22px;
+}
+.css-1i6ie4z br.tablet, .css-1i6ie4z br.mobile {
+  display: none;
+}
+.css-1esh4h5 {
+  display: inline-block;
+  overflow: hidden;
+  min-width: 0px;
+  height: 42px;
+  border-radius: 21px;
+  border: 1px solid rgb(226, 226, 226);
+  background-color: rgb(255, 255, 255);
+  font-size: 16px;
+  font-weight: 600;
+  color: rgb(85, 85, 85);
+  line-height: 42px;
+  text-align: center;
+  transition: 0.3s;
+  outline: none;
+  box-sizing: border-box;
+  width: 144px;
+  padding: 0px;
+}
+.css-198mr1i button {
+  transition: none;
+  margin-left: 10px;
+}
+.css-fkhbxt {
+  display: inline-block;
+  overflow: hidden;
+  min-width: 0px;
+  height: 42px;
+  border-radius: 21px;
+  border: 1px solid rgb(22, 216, 163);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 42px;
+  text-align: center;
+  transition: 0.3s;
+  outline: none;
+  box-sizing: border-box;
+  background-color: rgb(22, 216, 163);
+  color: rgb(255, 255, 255);
+  width: 144px;
+  padding: 0px;
+}
+.css-1esh4h5:hover, .css-1esh4h5:active {
+  border-color: rgb(236, 236, 236);
+  background-color: rgb(236, 236, 236);
+}
+.css-fkhbxt:hover, .css-fkhbxt:active {
+  border-color: rgb(8, 196, 144);
+  background-color: rgb(8, 196, 144);
+}
+.css-1t2q9uf {
+  position: relative;
+  border: 1px solid rgb(220, 220, 220);
+  border-radius: 20px;
+  background-color: rgb(255, 255, 255);
+  padding: 27px 27px 20px;
+}
+.css-15iqo0v {
+  margin-top: 18px;
+  background-color: rgb(255, 255, 255);
+  border-radius: 20px;
+  box-shadow: rgba(0, 0, 0, 0.06) 0px 1px 1px 0px;
+}
+.css-1cyfuwa {
+  position: relative;
+  padding: 24px 27px 18px;
+  border-radius: 10px;
+  background-color: rgb(255, 255, 255);
+  z-index: 30;
+  border: 1px solid rgb(226, 226, 226);
+}
+.css-1cyfuwa textarea {
+  resize: none;
+  width: 100%;
+  height: 44px;
+  max-height: 88px;
+  border: 0px;
+  outline: none;
+  font-size: 16px;
+  color: rgb(0, 0, 0);
+  vertical-align: top;
+  line-height: 22px;
+}
+.css-ljggwk {
+  margin-top: 17px;
+}
+.css-109f9np {
+  float: left;
+  position: relative;
+  padding-top: 14px;
+}
+.css-11ofcmn {
+  float: right;
+  width: 110px;
+}
