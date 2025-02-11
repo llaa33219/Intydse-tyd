@@ -505,7 +505,7 @@
   /* [추가] avatar가 같을 때 .css-1kivsx6 배경 표시 */
   .css-1kivsx6 {
     margin-top: 18px;
-    background-color: rgb(231, 251, 246);
+    background-color: rgb(231, 251, 246) !important;
     border-radius: 20px;
     box-shadow: rgba(0, 0, 0, 0.06) 0px 1px 1px 0px;
   }

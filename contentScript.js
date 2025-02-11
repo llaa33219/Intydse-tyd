@@ -490,25 +490,37 @@ function startEntrystoryScript() {
   }
 
   /*******************************************************************
-   * [수정] convertLinks 함수: 
-   *        "https://", "http://" 로 시작하면 그대로 링크화,
-   *        그 외에는 "http://"를 붙여 링크화
+   * [수정] convertLinks 함수:
+   *  - "https://", "http://" 로 시작하면 그대로 링크화하고,
+   *  - 그 외에는 "http://"를 붙여 링크화합니다.
+   *  - 도메인, 하위 경로, 쿼리문 및 해시(#)를 포함하여 전체 URL을 한 번에 변환합니다.
+   *  - 도메인과 경로에 이모지, 한글, 특수문자 등 유니코드 문자를 포함하도록 지원합니다.
+   *
    *******************************************************************/
   function convertLinks(content) {
-    // [포인트] capture (그룹) 사용: 
-    //   "https://", "http://" 등을 포함할 수 있게 정규식 확장
-    //   ( + domain 형태 전부 일괄로 잡아옴 )
-    return content.replace(
-      /\b((https?:\/\/)?[a-z0-9\-]+\.[a-z0-9.\-]+(?:\/[^\s]*)?)\b/gi,
-      (match, p1) => {
-        // 이미 "http://" 또는 "https://"로 시작하면 그대로
-        if (/^https?:\/\//i.test(p1)) {
-          return `<a target="_blank" href="/redirect?external=${p1}" rel="noreferrer">${p1}</a>`;
-        }
-        // 그 외(프로토콜이 안붙은 경우)는 "http://" 붙여 링크
-        return `<a target="_blank" href="/redirect?external=http://${p1}" rel="noreferrer">${p1}</a>`;
-      }
+    const urlRegex = new RegExp(
+      String.raw`(?<!\S)(` + // 앞에 공백 또는 문자열 시작이 있는지 확인 (Unicode 경계 문제 해결)
+        // Optional protocol (group 2)
+        String.raw`(https?:\/\/)?` +
+        // Domain: 국제화 도메인(IDN) 또는 IPv4 주소.
+        // 도메인 라벨은 문자(\p{L}), 숫자(\p{N}), 기호(\p{So}), 결합 문자(\p{M}) 및 하이픈(-)을 포함할 수 있음.
+        // 마지막 도메인 레이블은 최소 2글자의 문자, 기호 또는 결합 문자여야 함.
+        String.raw`(?:(?:[\p{L}\p{N}\p{So}\p{M}-]+\.)+[\p{L}\p{So}\p{M}]{2,}|(?:\d{1,3}\.){3}\d{1,3})` +
+        // Optional path: '/'로 시작하여 공백이나 일부 구두점(.,!? 또는 ))이 나오기 전까지
+        String.raw`(?:\/[^\s.,!?)]*)?` +
+        // Optional query string or hash fragment: '?' 또는 '#'로 시작하여 공백이나 일부 구두점이 나오기 전까지
+        String.raw`(?:[?#][^\s.,!?)]*)?` +
+      String.raw`)` +
+      String.raw`(?=[\s.,!?)]|$)`,
+      "giu"
     );
+
+    return content.replace(urlRegex, (match, url, protocol) => {
+      if (protocol) {
+        return `<a target="_blank" href="/redirect?external=${url}" rel="noreferrer">${url}</a>`;
+      }
+      return `<a target="_blank" href="/redirect?external=http://${url}" rel="noreferrer">${url}</a>`;
+    });
   }
 
   // "내 아바타" 파일명 얻기
