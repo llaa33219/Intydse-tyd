@@ -6,11 +6,30 @@ let allowMarkdown = false;
 let allowJs = false;
 let extensionEnabled = true; // 기본값: true 라 가정
 
+// 댓글 캐시(글ID -> [commentData, ...])
+if (!window.__commentCacheForComments) {
+  window.__commentCacheForComments = {};
+}
+
+// -------------------------------------------------------------
+// (추가) "더보기 중복 클릭" 문제 방지용 로딩 상태
+// -------------------------------------------------------------
+if (!window.__commentIsLoadingMap) {
+  window.__commentIsLoadingMap = {};
+}
+
+// -------------------------------------------------------------
+// (추가) 편집 중인 댓글 ID 저장용(중복 DOM 갱신 방지)
+// -------------------------------------------------------------
+if (!window.__editingCommentSet) {
+  window.__editingCommentSet = new Set();
+}
+
 // 1) 초기 로딩
 chrome.storage.sync.get(
   ["enableExtension", "allowHtml", "allowMarkdown", "allowJs"],
   (result) => {
-    extensionEnabled = (result.enableExtension !== false); 
+    extensionEnabled = (result.enableExtension !== false);
     allowHtml = !!result.allowHtml;
     allowMarkdown = !!result.allowMarkdown;
     allowJs = !!result.allowJs;
@@ -174,7 +193,6 @@ function reInjectInlineScripts(parentEl) {
   });
 }
 
-
 /*******************************************************************
  * 기존 콘탠츠 스크립트 원본 코드 (질문에서 주신 부분 유지)
  *******************************************************************/
@@ -256,24 +274,84 @@ let mainIntervalId = null;
 /*******************************************************************
  * 2) [추가] "메인 스크립트"를 시작하는 함수 (기존 코드 전부 포함)
  *******************************************************************/
-
 // (글 ID 저장용)
 const knownIds = new Set();
 let isFirstFetch = true;
 
-// [추가] '더보기' 메뉴 바깥 클릭 시 닫기 위한 핸들러 변수
+// [추가] 더보기 메뉴 바깥 클릭 시 닫기 위한 핸들러 변수
 let docClickHandlerForMoreMenus = null;
 
+/*******************************************************************
+ * [추가] 댓글 페이지네이션 용 searchAfter 맵 (글ID -> 마지막 searchAfter)
+ *******************************************************************/
+if (!window.__commentSearchAfterMap) {
+  window.__commentSearchAfterMap = {};
+}
+
+/*******************************************************************
+ * [수정] TLD 리스트를 외부에서 불러오도록 수정
+ *******************************************************************/
+let validTlds = new Set();
+let punycodeTlds = new Set();
+let tldListFetched = false;
+
+function fetchTldListFromIANA() {
+  // 이미 한 번 불러온 경우라면 다시 부르지 않음
+  if (tldListFetched) return;
+  tldListFetched = true;
+
+  fetch("https://data.iana.org/TLD/tlds-alpha-by-domain.txt")
+    .then(res => res.text())
+    .then(text => {
+      const lines = text.split(/\r?\n/);
+      for (let line of lines) {
+        line = line.trim();
+        if (!line || line.startsWith("#")) continue;
+        const lower = line.toLowerCase();
+        // punycode TLD 체크
+        if (lower.startsWith("xn--")) {
+          punycodeTlds.add(lower);
+        } else {
+          validTlds.add(lower);
+        }
+      }
+      console.log("IANA TLD 목록 로딩 완료:",
+        validTlds.size, "개 일반 TLD,",
+        punycodeTlds.size, "개 punycode TLD");
+    })
+    .catch(err => {
+      console.warn("IANA TLD 목록 불러오기 실패, fallback 사용:", err);
+      // 외부 목록 불러오기 실패 시 하드코딩 목록 fallback
+      validTlds = new Set([
+        "com","net","org","io","gov","edu","kr","co","jp","dev","info","tv",
+        "gg","xyz","us","uk","de","ru","fr","ca","cn","au","ch","it","nl","se",
+        "no","biz","live","mil","me","shop","online","app","tech","cc"
+      ]);
+      punycodeTlds = new Set([
+        "xn--3e0b707e", // .한국
+        "xn--mk1bu44c", // .닷컴
+        "xn--mk1bu44g"  // .닷넷
+      ]);
+    });
+}
+
+/*******************************************************************
+ * 3) [추가] "메인 스크립트"를 중단(stop)하는 함수
+ *******************************************************************/
 function startEntrystoryScript() {
   if (scriptStarted) return; // 이미 실행 중이면 중복 방지
   scriptStarted = true;
+
+  // TLD 목록 외부에서 불러오기 (실패 시 fallback)
+  fetchTldListFromIANA();
 
   // 매번 초기화
   knownIds.clear();
   isFirstFetch = true;
 
   /*************************************************
-   * [원본 코드 시작 - 내용 그대로 유지]
+   * -------------- 원본 로직 시작 ---------------
+   * (아래 전체가 startEntrystoryScript 내부임)
    *************************************************/
 
   /*************************************************
@@ -474,9 +552,9 @@ function startEntrystoryScript() {
     credentials: "include"
   };
 
-  /*************************************************
-   * (아래에 댓글/좋아요/스티커 등 기존 로직 존재)
-   *************************************************/
+  // ----------------------------------------------------------------
+  // (이후 댓글/좋아요/스티커/편집/목록 로딩/댓글 로딩 등의 로직 전부 유지)
+  // ----------------------------------------------------------------
 
   // 날짜 포맷
   function formatDate(dateString) {
@@ -490,36 +568,73 @@ function startEntrystoryScript() {
   }
 
   /*******************************************************************
-   * [수정] convertLinks 함수:
-   *  - "https://", "http://" 로 시작하면 그대로 링크화하고,
-   *  - 그 외에는 "http://"를 붙여 링크화합니다.
-   *  - 도메인, 하위 경로, 쿼리문 및 해시(#)를 포함하여 전체 URL을 한 번에 변환합니다.
-   *  - 도메인과 경로에 이모지, 한글, 특수문자 등 유니코드 문자를 포함하도록 지원합니다.
-   *
+   * [수정] convertLinks 함수 + hasRealTld():
+   *   - 한글 TLD도 실제로 등록된 경우만 인식되도록 punycode 목록 추가
+   *   - "https://" 또는 "http://"가 있으면 그대로, 없으면 "http://" 붙임
+   *   - 경로/쿼리에 괄호 등 포함
    *******************************************************************/
+  function hasRealTld(domainPart) {
+    let asciiDomain;
+    try {
+      asciiDomain = new URL("http://" + domainPart).hostname;
+    } catch (e) {
+      return false;
+    }
+    const lastDotIndex = asciiDomain.lastIndexOf('.');
+    if (lastDotIndex < 0) return false;
+
+    const tld = asciiDomain.slice(lastDotIndex + 1).toLowerCase();
+
+    if (punycodeTlds.has(tld)) {
+      return true;
+    }
+    return validTlds.has(tld);
+  }
+
   function convertLinks(content) {
     const urlRegex = new RegExp(
-      String.raw`(?<!\S)(` + // 앞에 공백 또는 문자열 시작이 있는지 확인 (Unicode 경계 문제 해결)
-        // Optional protocol (group 2)
+      String.raw`(?<!\S)(` +
+        // 1) optional protocol
         String.raw`(https?:\/\/)?` +
-        // Domain: 국제화 도메인(IDN) 또는 IPv4 주소.
-        // 도메인 라벨은 문자(\p{L}), 숫자(\p{N}), 기호(\p{So}), 결합 문자(\p{M}) 및 하이픈(-)을 포함할 수 있음.
-        // 마지막 도메인 레이블은 최소 2글자의 문자, 기호 또는 결합 문자여야 함.
+        // 2) domain
         String.raw`(?:(?:[\p{L}\p{N}\p{So}\p{M}-]+\.)+[\p{L}\p{So}\p{M}]{2,}|(?:\d{1,3}\.){3}\d{1,3})` +
-        // Optional path: '/'로 시작하여 공백이나 일부 구두점(.,!? 또는 ))이 나오기 전까지
-        String.raw`(?:\/[^\s.,!?)]*)?` +
-        // Optional query string or hash fragment: '?' 또는 '#'로 시작하여 공백이나 일부 구두점이 나오기 전까지
-        String.raw`(?:[?#][^\s.,!?)]*)?` +
+        // 3) optional path (괄호 등 포함)
+        String.raw`(?:\/\S*)?` +
+        // 4) optional query/hash (괄호 등 포함)
+        String.raw`(?:[?#]\S*)?` +
       String.raw`)` +
-      String.raw`(?=[\s.,!?)]|$)`,
+      String.raw`(?=[\s]|$)`,
       "giu"
     );
 
-    return content.replace(urlRegex, (match, url, protocol) => {
+    return content.replace(urlRegex, (match, entireUrl, protocol) => {
+      let domainToCheck = entireUrl;
       if (protocol) {
-        return `<a target="_blank" href="/redirect?external=${url}" rel="noreferrer">${url}</a>`;
+        domainToCheck = domainToCheck.slice(protocol.length);
       }
-      return `<a target="_blank" href="/redirect?external=http://${url}" rel="noreferrer">${url}</a>`;
+
+      const slashIdx = domainToCheck.indexOf('/');
+      let onlyDomain = (slashIdx === -1)
+        ? domainToCheck
+        : domainToCheck.slice(0, slashIdx);
+
+      const qIdx = onlyDomain.indexOf('?');
+      if (qIdx >= 0) {
+        onlyDomain = onlyDomain.slice(0, qIdx);
+      }
+      const hIdx = onlyDomain.indexOf('#');
+      if (hIdx >= 0) {
+        onlyDomain = onlyDomain.slice(0, hIdx);
+      }
+
+      if (!hasRealTld(onlyDomain)) {
+        return match;
+      }
+
+      if (protocol) {
+        return `<a target="_blank" href="/redirect?external=${entireUrl}" rel="noreferrer">${entireUrl}</a>`;
+      }
+      return `<a target="_blank" href="/redirect?external=http://${entireUrl}" rel="noreferrer">${entireUrl}</a>`;
     });
   }
 
@@ -728,8 +843,9 @@ function startEntrystoryScript() {
         const sid = imgEl.getAttribute('data-sticker-id') || "";
         window.__selectedStickerId = sid;
 
-        const container = popupEl.closest('.edit-mode-li') || 
-                          popupEl.closest('.css-4e8bhg.euhmxlr2');
+        const container = popupEl.closest('.edit-mode-li') ||
+                          popupEl.closest('.css-4e8bhg.euhmxlr2') ||
+                          popupEl.closest('.comment-edit-mode'); 
         if (!container) {
           popupEl.style.display = 'none';
           return;
@@ -873,7 +989,7 @@ function startEntrystoryScript() {
         if (!updated || !updated.id) {
           throw new Error("잘못된 수정 응답");
         }
-        // ----- BugFix: 수정 성공 후 스티커ID 초기화 -----
+        // 수정 성공 후 스티커ID 초기화
         window.__selectedStickerId = null;
 
         return updated;
@@ -881,7 +997,101 @@ function startEntrystoryScript() {
   }
 
   /***************************************************************
-   * [추가] "수정하기" 모드: <li>를 통째로 교체
+   * [추가] 댓글 수정(GraphQL)
+   ***************************************************************/
+  function repairComment(commentId, content, stickerItem = null) {
+    const csrf = requestOptions.headers["csrf-token"];
+    const xtoken = requestOptions.headers["x-token"];
+
+    const bodyData = {
+      query: `
+        mutation REPAIR_COMMENT(
+          $id: ID,
+          $content: String,
+          $image: String,
+          $sticker: ID,
+          $stickerItem: ID
+        ){
+          repairComment(
+            id: $id,
+            content: $content,
+            image: $image,
+            sticker: $sticker,
+            stickerItem: $stickerItem
+          ) {
+            id
+            user {
+              id
+              nickname
+              username
+              profileImage {
+                id
+                name
+                filename
+                imageType
+              }
+              mark {
+                id
+                name
+                filename
+                imageType
+              }
+            }
+            content
+            created
+            likesLength
+            isLike
+            sticker {
+              id
+              name
+              filename
+              imageType
+            }
+          }
+        }
+      `,
+      variables: {
+        id: commentId,
+        content: content,
+        image: null,
+        sticker: null,
+        stickerItem: stickerItem
+      }
+    };
+
+    const fetchOptions = {
+      headers: {
+        "accept": "*/*",
+        "content-type": "application/json",
+        "csrf-token": csrf,
+        "x-token": xtoken
+      },
+      body: JSON.stringify(bodyData),
+      method: "POST",
+      credentials: "include"
+    };
+
+    return fetch("https://playentry.org/graphql/REPAIR_COMMENT", fetchOptions)
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`REPAIR_COMMENT failed: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(json => {
+        const updated = json?.data?.repairComment;
+        if (!updated || !updated.id) {
+          throw new Error("잘못된 댓글 수정 응답");
+        }
+        // 수정 성공 후 스티커ID 초기화
+        window.__selectedStickerId = null;
+
+        return updated;
+      });
+  }
+
+  /***************************************************************
+   * [추가] "수정하기" 모드(글)
    ***************************************************************/
   function editPostInPlace(oldLi) {
     const item = oldLi.__itemData;
@@ -890,6 +1100,8 @@ function startEntrystoryScript() {
     // (1) 새 편집모드 li
     const editLi = document.createElement('li');
     editLi.className = "css-15iqo0v e13giesq1 edit-mode-li";
+    // [추가] 확장에서 만든 li임을 표시
+    editLi.setAttribute("data-from-extension", "true");
 
     const safeContent = item.content || "";
     let stUrl = "";
@@ -970,7 +1182,97 @@ function startEntrystoryScript() {
   }
 
   /***************************************************************
-   * 기존 "일반 모드" 글 목록 <li> 생성
+   * [추가] "댓글 수정하기" 모드
+   ***************************************************************/
+  function editCommentInPlace(oldLi, cData, discussId) {
+    // 편집 시작 시 -> 해당 댓글ID를 편집중 set에 등록
+    window.__editingCommentSet.add(cData.id);
+
+    const editWrapper = document.createElement('div');
+    editWrapper.className = "css-f41j3c e18ruxnk2 comment-edit-mode";
+
+    const safeContent = cData.content || "";
+    let stUrl = "";
+    if (cData.sticker && cData.sticker.filename) {
+      const sub1 = cData.sticker.filename.substring(0,2);
+      const sub2 = cData.sticker.filename.substring(2,4);
+      stUrl = `/uploads/${sub1}/${sub2}/${cData.sticker.filename}`;
+      if (cData.sticker.imageType) {
+        stUrl += `.${cData.sticker.imageType}`;
+      }
+    }
+
+    editWrapper.innerHTML = `
+<div class="css-1cyfuwa e1h77j9v12">
+  <div class="css-11v8s45 e1h77j9v1">
+    <textarea id="Write" name="Write" style="height: 22px !important;">${safeContent}</textarea>
+  </div>
+  <div class="css-fjfa6z e1h77j9v3" style="${stUrl ? '' : 'display:none;'}">
+    <em>
+      <img src="${stUrl}" alt="댓글 첨부 스티커" style="width: 105px; height: 105px;">
+      <a href="/" role="button" class="btn-close-sticker">
+        <span class="blind">스티커 닫기</span>
+      </a>
+    </em>
+  </div>
+  <div class="css-ljggwk e1h77j9v9">
+    <div class="css-109f9np e1h77j9v7">
+      <a role="button" class="css-1394o6u e1h77j9v5">
+        <span class="blind">스티커</span>
+      </a>
+      ${createStickerPopupHtml()}
+    </div>
+    <span class="css-11ofcmn e1h77j9v8">
+      <a href="/" data-btn-type="login" data-testid="button"
+         class="css-1adjw8a e13821ld2 comment-edit-submit-btn">수정</a>
+    </span>
+  </div>
+</div>
+    `.trim();
+
+    oldLi.innerHTML = "";
+    oldLi.appendChild(editWrapper);
+
+    setupStickerUiEvents(editWrapper);
+
+    // "수정" 버튼
+    const editBtn = editWrapper.querySelector('.comment-edit-submit-btn');
+    if (editBtn) {
+      editBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const textarea = editWrapper.querySelector('textarea#Write');
+        if (!textarea) return;
+
+        const newContent = textarea.value.trim();
+        const stickerId = window.__selectedStickerId || null;
+
+        repairComment(cData.id, newContent, stickerId)
+          .then((updatedComment) => {
+            // 편집 완료 -> 편집중 set에서 제거
+            window.__editingCommentSet.delete(cData.id);
+
+            // DOM 완전 재생성
+            const arr = window.__commentCacheForComments[discussId] || [];
+            const idx = arr.findIndex(x => x.id === cData.id);
+            if (idx >= 0) {
+              arr[idx] = updatedComment;
+            }
+            const newLi = createSingleCommentLi(updatedComment, discussId);
+            if (oldLi.parentNode) {
+              oldLi.parentNode.replaceChild(newLi, oldLi);
+            }
+          })
+          .catch(() => {
+            alert('댓글 수정에 실패했습니다. 잠시 후 다시 시도해주세요.');
+            // 실패 -> 편집중 해제
+            window.__editingCommentSet.delete(cData.id);
+          });
+      });
+    }
+  }
+
+  /***************************************************************
+   * "일반 모드" 글 목록 <li> 생성 함수
    ***************************************************************/
   function createCollapsedPostHTML(item, backgroundStyle, contentHtml, dateStr, likeCount, commentCount, userId, userName) {
     const likeClass = item.isLike ? "like active" : "like";
@@ -1013,8 +1315,11 @@ function startEntrystoryScript() {
       `.trim();
     }
 
+    // ★ [추가] data-from-extension="true" + 빨간 문구 삽입 (댓글이 아닌 "글" 전용)
     return `
-<li class="css-1mswyjj eelonj20">
+<li class="css-1mswyjj eelonj20" data-from-extension="true">
+  <div style="color: rgba(0, 0, 0, 0); font-size:1px;">(이 스크립트에서 생성된 글)</div>
+
   <div class="css-puqjcw e1877mpo2">
     <a class="css-18bdrlk enx4swp0" href="/profile/${userId}" style="${backgroundStyle}">
       <span class="blind">유저 썸네일</span>
@@ -1040,8 +1345,15 @@ function startEntrystoryScript() {
       <div class="css-19v4su1 e12alrlo0">
         <div href="" class="css-1v3ka1a e1wvddxk0">
           <ul>
-            <li><a href="https://playentry.org/community/entrystory/${item.id}/">게시글로 이동</a></li>
-            <li><a href="/" class="report-button" data-discuss-id="${item.id}">신고하기</a></li>
+            <!-- 아래 두 li에 확장 프로그램 표기 추가 -->
+            <li data-from-extension="true">
+              <a href="https://playentry.org/community/entrystory/${item.id}/">게시글로 이동</a>
+              <div style="color: rgba(0, 0, 0, 0); font-size:1px;">(이 확장 프로그램이 생성한 메뉴)</div>
+            </li>
+            <li data-from-extension="true">
+              <a href="/" class="report-button" data-discuss-id="${item.id}">신고하기</a>
+              <div style="color: rgba(0, 0, 0, 0); font-size:1px;">(이 확장 프로그램이 생성한 메뉴)</div>
+            </li>
           </ul>
           <span class="css-1s3ybmc e1wvddxk1"><i>&nbsp;</i></span>
         </div>
@@ -1091,7 +1403,12 @@ function startEntrystoryScript() {
         const ulMenu = li.querySelector('.css-13q8c66.e12alrlo2 ul');
         if (ulMenu) {
           const editLi = document.createElement('li');
-          editLi.innerHTML = `<a href="/" class="edit-button" data-discuss-id="${item.id}">수정하기</a>`;
+          // 여기 "수정하기"에도 확장 프로그램 표기 추가
+          editLi.setAttribute('data-from-extension', 'true');
+          editLi.innerHTML = `
+            <a href="/" class="edit-button" data-discuss-id="${item.id}">수정하기</a>
+            <div style="color: rgba(0, 0, 0, 0); font-size:1px;">(이 확장 프로그램이 생성한 메뉴)</div>
+          `;
           ulMenu.insertBefore(editLi, ulMenu.firstElementChild);
         }
       }
@@ -1104,8 +1421,10 @@ function startEntrystoryScript() {
         e.preventDefault();
         const existingCommentSection = li.querySelector('.css-4e8bhg.euhmxlr2');
         if (existingCommentSection) {
+          // 댓글 닫기
           revertToCollapsed(li);
         } else {
+          // 댓글 열기
           fetchCommentsThenExpand(li);
         }
       });
@@ -1153,7 +1472,7 @@ function startEntrystoryScript() {
       });
     }
 
-    // 수정하기
+    // 수정하기 (글)
     const editBtn = li.querySelector('.edit-button');
     if (editBtn) {
       editBtn.addEventListener('click', (e) => {
@@ -1165,10 +1484,15 @@ function startEntrystoryScript() {
     return li;
   }
 
-  /***************************************************************
-   * 댓글 로딩/갱신/펼치기
-   ***************************************************************/
-  function fetchComments(discussId) {
+  function revertToCollapsed(li) {
+    const commentSection = li.querySelector('.css-4e8bhg.euhmxlr2');
+    if (commentSection) {
+      commentSection.remove();
+    }
+  }
+
+  // 댓글 불러오기 함수
+  function fetchComments(discussId, searchAfterParam = null) {
     const csrf = requestOptions.headers["csrf-token"];
     const xtoken = requestOptions.headers["x-token"];
 
@@ -1230,7 +1554,8 @@ function startEntrystoryScript() {
           display: 10,
           sort: "created",
           order: 1
-        }
+        },
+        searchAfter: searchAfterParam
       }
     };
 
@@ -1261,23 +1586,559 @@ function startEntrystoryScript() {
     return fetch("https://playentry.org/graphql/SELECT_COMMENTS", commentFetchOptions)
       .then((res) => res.json())
       .then((json) => {
-        return json?.data?.commentList?.list || [];
+        const data = json?.data?.commentList;
+        const list = data?.list || [];
+        const newSearchAfter = data?.searchAfter || null;
+        // 최신 searchAfter 저장
+        window.__commentSearchAfterMap[discussId] = newSearchAfter;
+        return list;
       })
-      .catch((err) => {
+      .catch(() => {
         return [];
       });
   }
 
-  function createSignatureFromItem(item) {
-    return item.id;
+  // 댓글 펼치기
+  async function fetchCommentsThenExpand(collapsedLi) {
+    const discussId = collapsedLi.__itemData.id;
+    if (collapsedLi.querySelector('.css-4e8bhg.euhmxlr2')) {
+      return; // 이미 열려있다면 무시
+    }
+
+    const newComments = await fetchComments(discussId, null);
+    window.__commentCacheForComments[discussId] = newComments;
+
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = createCommentSectionHTML(collapsedLi.__itemData, newComments);
+    const commentSection = tempDiv.firstElementChild;
+
+    // 닫기 버튼
+    const closeBtn = commentSection.querySelector('.css-rb1pwc.euhmxlr0');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        revertToCollapsed(collapsedLi);
+      });
+    }
+
+    // 각 댓글 좋아요
+    const commentLikeBtns = commentSection.querySelectorAll('a.like[data-comment-id]');
+    commentLikeBtns.forEach((btn) => {
+      const cId = btn.getAttribute('data-comment-id');
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const arr = window.__commentCacheForComments[discussId] || [];
+        const cData = arr.find(x => x.id === cId);
+        if (!cData) return;
+        if (cData.isLike) {
+          unlikeDiscuss(cData.id, btn, "comment", discussId);
+        } else {
+          likeDiscuss(cData.id, btn, "comment", discussId);
+        }
+      });
+    });
+
+    // 스티커 UI
+    setupStickerUiEvents(commentSection);
+
+    // 댓글 등록 버튼
+    const registerBtn = commentSection.querySelector('a.css-1adjw8a.e13821ld2');
+    if (registerBtn) {
+      registerBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        const textarea = commentSection.querySelector('textarea#Write');
+        if (!textarea) return;
+        const content = textarea.value.trim();
+        const stickerId = window.__selectedStickerId || null;
+        if (!content && !stickerId) {
+          alert("댓글 내용을 입력해 주세요 (또는 스티커만 등록 가능).");
+          return;
+        }
+        createComment(discussId, content, stickerId).then(() => {
+          textarea.value = "";
+          resetStickerSelection(commentSection);
+        });
+      });
+    }
+
+    // 더보기(메뉴)
+    const commentMoreBtns = commentSection.querySelectorAll('.css-9ktsbr.e12alrlo1');
+    commentMoreBtns.forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        btn.classList.toggle('active');
+        const nextDiv = btn.parentNode.querySelector('.css-19v4su1.e12alrlo0')
+                      || btn.parentNode.querySelector('.css-16el6fj.e12alrlo0');
+        if (nextDiv) {
+          if (nextDiv.classList.contains('css-19v4su1')) {
+            nextDiv.classList.remove('css-19v4su1');
+            nextDiv.classList.add('css-16el6fj');
+          } else {
+            nextDiv.classList.remove('css-16el6fj');
+            nextDiv.classList.add('css-19v4su1');
+          }
+        }
+      });
+    });
+
+    // "댓글 더보기" 버튼
+    const loadMoreBtn = commentSection.querySelector('.reply_more');
+    if (loadMoreBtn) {
+      const curSA = window.__commentSearchAfterMap[discussId];
+      if (!curSA) {
+        loadMoreBtn.style.display = 'none';
+      }
+      loadMoreBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        loadMoreComments(discussId, commentSection);
+      });
+    }
+
+    // (추가됨) "수정하기" 버튼에 대한 이벤트 연결 (초기 로딩 댓글)
+    const editButtons = commentSection.querySelectorAll('.comment-edit-button');
+    editButtons.forEach((editBtn) => {
+      const cId = editBtn.getAttribute('data-comment-id');
+      editBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const cData = newComments.find(x => x.id === cId);
+        if (!cData) return;
+        const liEl = editBtn.closest('li.css-u1nrp7.e9nkex10');
+        if (!liEl) return;
+        editCommentInPlace(liEl, cData, discussId);
+      });
+    });
+
+    collapsedLi.appendChild(commentSection);
+    reInjectInlineScripts(commentSection);
   }
 
-  let olderSearchAfter = null;
+  function loadMoreComments(discussId, commentSection) {
+    if (window.__commentIsLoadingMap[discussId]) {
+      return;
+    }
+    window.__commentIsLoadingMap[discussId] = true;
 
+    const currentSA = window.__commentSearchAfterMap[discussId];
+    if (!currentSA) {
+      const btn = commentSection.querySelector('.reply_more');
+      if (btn) btn.style.display = 'none';
+      window.__commentIsLoadingMap[discussId] = false;
+      return;
+    }
+
+    fetchComments(discussId, currentSA).then((loaded) => {
+      if (!loaded || loaded.length === 0) {
+        const btn = commentSection.querySelector('.reply_more');
+        if (btn) btn.style.display = 'none';
+        window.__commentIsLoadingMap[discussId] = false;
+        return;
+      }
+
+      const cUl = commentSection.querySelector('.css-1e7cskh.euhmxlr1');
+      if (!cUl) {
+        window.__commentIsLoadingMap[discussId] = false;
+        return;
+      }
+
+      // 이미 DOM에 있는 댓글 ID -> Set
+      const existingIds = new Set();
+      cUl.querySelectorAll('[data-comment-id]').forEach((b) => {
+        existingIds.add(b.getAttribute('data-comment-id'));
+      });
+
+      const cacheArr = window.__commentCacheForComments[discussId];
+      loaded.forEach((cItem) => {
+        if (!existingIds.has(cItem.id)) {
+          const liEl = createSingleCommentLi(cItem, discussId);
+          cUl.appendChild(liEl);
+          cacheArr.push(cItem);
+        }
+      });
+
+      const newSA = window.__commentSearchAfterMap[discussId];
+      if (!newSA) {
+        const btn = commentSection.querySelector('.reply_more');
+        if (btn) btn.style.display = 'none';
+      }
+      window.__commentIsLoadingMap[discussId] = false;
+    }).catch(() => {
+      window.__commentIsLoadingMap[discussId] = false;
+    });
+  }
+
+  /*******************************************************************
+   * (추가됨) createCommentSectionHTML:
+   *   - 처음 댓글 생성 시에도 "내 댓글"이면 수정하기 메뉴를 넣어주도록 수정
+   *******************************************************************/
+  function createCommentSectionHTML(item, commentsArray) {
+    const myAvatarFilename = getMyAvatarFilename(); // (추가됨)
+
+    const commentLis = commentsArray.map((c) => {
+      const cUserId = c.user?.id || "";
+      const cUserName = c.user?.nickname || "NoName";
+      const cDate = formatDate(c.created);
+
+      const safeContent = sanitizeUserContent(c.content || "");
+      const cHtml = convertLinks(safeContent);
+      const cLike = c.likesLength || 0;
+      const cLikeClass = c.isLike ? "like active" : "like";
+
+      let cBg = 'background-image: url("/img/EmptyImage.svg");';
+      const cPf = c?.user?.profileImage;
+      if (cPf && cPf.filename && cPf.filename.length >= 4) {
+        const ccSub1 = cPf.filename.substring(0, 2);
+        const ccSub2 = cPf.filename.substring(2, 4);
+        if (cPf.imageType) {
+          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}.${cPf.imageType}'), url('/img/EmptyImage.svg');`;
+        } else {
+          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}'), url('/img/EmptyImage.svg');`;
+        }
+      }
+
+      let cUserMarkHtml = "";
+      const cMark = c?.user?.mark;
+      if (cMark && cMark.filename && cMark.filename.length >= 4) {
+        const mkSub1 = cMark.filename.substring(0,2);
+        const mkSub2 = cMark.filename.substring(2,4);
+        let mkUrl = `/uploads/${mkSub1}/${mkSub2}/${cMark.filename}`;
+        if (cMark.imageType) {
+          mkUrl += `.${cMark.imageType}`;
+        }
+        cUserMarkHtml = `
+          <span class="css-1b1jxqs ee2n3ac2"
+            style="background-image: url('${mkUrl}'), url('/img/EmptyImage.svg');
+                   display: inline-block; 
+                   font-size: 14px; 
+                   font-weight: 600; 
+                   color: rgb(255, 255, 255); 
+                   line-height: 16px; 
+                   vertical-align: top;">
+            <span class="blind">${cMark.name || "마크"}</span>
+          </span>
+        `.trim();
+      }
+
+      let cStickerHtml = "";
+      if (c.sticker && c.sticker.filename && c.sticker.filename.length >= 4) {
+        const cStSub1 = c.sticker.filename.substring(0, 2);
+        const cStSub2 = c.sticker.filename.substring(2, 4);
+        let cStUrl = `/uploads/${cStSub1}/${cStSub2}/${c.sticker.filename}`;
+        if (c.sticker.imageType) {
+          cStUrl += `.${c.sticker.imageType}`;
+        }
+        cStickerHtml = `
+          <em class="css-18ro4ma e1877mpo0">
+            <img src="${cStUrl}" alt="sticker" style="width: 74px; height: 74px;">
+          </em>
+        `.trim();
+      }
+
+      // (추가됨) 내 댓글이면 "수정하기" 메뉴 추가
+      let editMenuHtml = "";
+      if (myAvatarFilename && c.user && c.user.profileImage) {
+        const fullPfilename = c.user.profileImage.filename + 
+          (c.user.profileImage.imageType ? '.' + c.user.profileImage.imageType : '');
+        if (fullPfilename === myAvatarFilename) {
+          editMenuHtml = `
+            <li data-from-extension="true">
+              <a href="/" class="comment-edit-button" data-comment-id="${c.id}">수정하기</a>
+              <div style="color: rgba(0, 0, 0, 0); font-size:1px;">(이 확장 프로그램이 생성한 메뉴)</div>
+            </li>
+          `;
+        }
+      }
+
+      return `
+<li class="css-u1nrp7 e9nkex10" data-from-extension="true">
+  <div class="css-uu8yq6 e3yf6l22">
+    <a class="css-16djw2l enx4swp0" href="/profile/${cUserId}" style="${cBg}">
+      <span class="blind">유저 썸네일</span>
+    </a>
+    <div class="css-1t19ptn ee2n3ac5">
+      <a href="/profile/${cUserId}">
+        ${cUserMarkHtml}${cUserName}
+      </a>
+      <em>${cDate}</em>
+    </div>
+    <div class="css-6wq60h e1i41bku1">
+      ${cHtml}
+    </div>
+    ${cStickerHtml}
+    <div class="css-1dcwahm e15ke9c50">
+      <em><a role="button" class="${cLikeClass}" data-comment-id="${c.id}">좋아요 ${cLike}</a></em>
+    </div>
+    <div class="css-13q8c66 e12alrlo2">
+      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
+        <span class="blind">더보기</span>
+      </a>
+      <div class="css-19v4su1 e12alrlo0">
+        <div class="css-1v3ka1a e1wvddxk0">
+          <ul>
+            <li><a href="https://playentry.org/community/entrystory/${item.id}/">게시글로 이동</a></li>
+            ${editMenuHtml}
+          </ul>
+          <span class="css-1s3ybmc e1wvddxk1"><i>&nbsp;</i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</li>
+      `.trim();
+    }).join("");
+
+    return `
+<div class="css-4e8bhg euhmxlr2">
+  <ul class="css-1e7cskh euhmxlr1">
+    ${commentLis}
+  </ul>
+  <div class="css-ahy3yn euhmxlr3">
+    <div class="replay_inner">
+      <a href="/" role="button" class="reply_more">답글 더 보기</a>
+    </div>
+    <div class="css-1cyfuwa e1h77j9v12">
+      <div class="css-11v8s45 e1h77j9v1">
+        <textarea id="Write" name="Write" placeholder="댓글을 입력해 주세요" style="height: 22px !important;"></textarea>
+      </div>
+      <div class="css-fjfa6z e1h77j9v3" style="display: none;">
+        <em>
+          <img src="" alt="댓글 첨부 스티커" style="width: 105px; height: 105px;">
+          <a href="/" role="button" class="btn-close-sticker">
+            <span class="blind">스티커 닫기</span>
+          </a>
+        </em>
+      </div>
+      <div class="css-ljggwk e1h77j9v9">
+        <div class="css-109f9np e1h77j9v7">
+          <a role="button" class="css-1394o6u e1h77j9v5">
+            <span class="blind">스티커</span>
+          </a>
+          ${createStickerPopupHtml()}
+        </div>
+        <span class="css-11ofcmn e1h77j9v8">
+          <a href="/" data-btn-type="login" data-testid="button"
+             class="css-1adjw8a e13821ld2">등록</a>
+        </span>
+      </div>
+    </div>
+    <a href="/" role="button" class="active css-rb1pwc euhmxlr0">
+      답글 접기
+    </a>
+  </div>
+</div>
+    `.trim();
+  }
+
+  // 댓글 li 생성
+  function createSingleCommentLi(c, discussId) {
+    const tempDiv = document.createElement('div');
+    const safeContent = sanitizeUserContent(c.content || "");
+    const cHtml = convertLinks(safeContent);
+    const cLike = c.likesLength || 0;
+    const cLikeClass = c.isLike ? "like active" : "like";
+    const cDate = formatDate(c.created);
+    const cUserId = c.user?.id || "";
+    const cUserName = c.user?.nickname || "NoName";
+
+    let cBg = 'background-image: url("/img/EmptyImage.svg");';
+    if (c.user?.profileImage?.filename?.length >= 4) {
+      const pf = c.user.profileImage;
+      const sub1 = pf.filename.substring(0,2);
+      const sub2 = pf.filename.substring(2,4);
+      if (pf.imageType) {
+        cBg = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}.${pf.imageType}'), url('/img/EmptyImage.svg');`;
+      } else {
+        cBg = `background-image: url('/uploads/${sub1}/${sub2}/${pf.filename}'), url('/img/EmptyImage.svg');`;
+      }
+    }
+
+    let cUserMarkHtml = "";
+    if (c.user?.mark?.filename?.length >= 4) {
+      const mk = c.user.mark;
+      const mkSub1 = mk.filename.substring(0,2);
+      const mkSub2 = mk.filename.substring(2,4);
+      let mkUrl = `/uploads/${mkSub1}/${mkSub2}/${mk.filename}`;
+      if (mk.imageType) mkUrl += `.${mk.imageType}`;
+      cUserMarkHtml = `
+        <span class="css-1b1jxqs ee2n3ac2"
+          style="background-image: url('${mkUrl}'), url('/img/EmptyImage.svg');
+                 display: inline-block; 
+                 font-size: 14px; 
+                 font-weight: 600; 
+                 color: #fff; 
+                 line-height: 16px; 
+                 vertical-align: top;">
+          <span class="blind">${mk.name || "마크"}</span>
+        </span>
+      `.trim();
+    }
+
+    let cStickerHtml = "";
+    if (c.sticker?.filename?.length >= 4) {
+      const sub1 = c.sticker.filename.substring(0,2);
+      const sub2 = c.sticker.filename.substring(2,4);
+      let stUrl = `/uploads/${sub1}/${sub2}/${c.sticker.filename}`;
+      if (c.sticker.imageType) stUrl += `.${c.sticker.imageType}`;
+      cStickerHtml = `
+        <em class="css-18ro4ma e1877mpo0">
+          <img src="${stUrl}" alt="sticker" style="width:74px; height:74px;">
+        </em>
+      `;
+    }
+
+    tempDiv.innerHTML = `
+<li class="css-u1nrp7 e9nkex10" data-from-extension="true">
+  <div class="css-uu8yq6 e3yf6l22">
+    <a class="css-16djw2l enx4swp0" href="/profile/${cUserId}" style="${cBg}">
+      <span class="blind">유저 썸네일</span>
+    </a>
+    <div class="css-1t19ptn ee2n3ac5">
+      <a href="/profile/${cUserId}">
+        ${cUserMarkHtml}${cUserName}
+      </a>
+      <em>${cDate}</em>
+    </div>
+    <div class="css-6wq60h e1i41bku1">
+      ${cHtml}
+    </div>
+    ${cStickerHtml}
+    <div class="css-1dcwahm e15ke9c50">
+      <em>
+        <a role="button" class="${cLikeClass}" data-comment-id="${c.id}">좋아요 ${cLike}</a>
+      </em>
+    </div>
+    <div class="css-13q8c66 e12alrlo2">
+      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
+        <span class="blind">더보기</span>
+      </a>
+      <div class="css-19v4su1 e12alrlo0">
+        <div class="css-1v3ka1a e1wvddxk0">
+          <ul>
+            <li><a href="https://playentry.org/community/entrystory/${discussId}/">게시글로 이동</a></li>
+          </ul>
+          <span class="css-1s3ybmc e1wvddxk1"><i>&nbsp;</i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</li>
+    `.trim();
+
+    const li = tempDiv.firstElementChild;
+
+    // 좋아요
+    const likeBtn = li.querySelector(`a[data-comment-id="${c.id}"]`);
+    if (likeBtn) {
+      likeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (c.isLike) {
+          unlikeDiscuss(c.id, likeBtn, "comment", discussId);
+        } else {
+          likeDiscuss(c.id, likeBtn, "comment", discussId);
+        }
+      });
+    }
+
+    // 더보기
+    const moreBtn = li.querySelector('.css-9ktsbr.e12alrlo1');
+    if (moreBtn) {
+      moreBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        moreBtn.classList.toggle('active');
+        const nextDiv = moreBtn.parentNode.querySelector('.css-19v4su1.e12alrlo0')
+                      || moreBtn.parentNode.querySelector('.css-16el6fj.e12alrlo0');
+        if (nextDiv) {
+          if (nextDiv.classList.contains('css-19v4su1')) {
+            nextDiv.classList.remove('css-19v4su1');
+            nextDiv.classList.add('css-16el6fj');
+          } else {
+            nextDiv.classList.remove('css-16el6fj');
+            nextDiv.classList.add('css-19v4su1');
+          }
+        }
+      });
+    }
+
+    // [추가] "내 댓글"이면 '수정하기' 메뉴 추가
+    const myAvatarFilename = getMyAvatarFilename();
+    if (c.user && c.user.profileImage && myAvatarFilename) {
+      const cPf = c.user.profileImage;
+      const fullPfilename = cPf.filename + (cPf.imageType ? '.' + cPf.imageType : '');
+      if (fullPfilename === myAvatarFilename) {
+        // 더보기 메뉴 ul
+        const ulMenu = li.querySelector('.css-13q8c66.e12alrlo2 ul');
+        if (ulMenu) {
+          const editLi = document.createElement('li');
+          editLi.setAttribute('data-from-extension', 'true');
+          editLi.innerHTML = `
+            <a href="/" class="comment-edit-button" data-comment-id="${c.id}">수정하기</a>
+            <div style="color:rgba(0, 0, 0, 0); font-size:1px;">(이 확장 프로그램이 생성한 메뉴)</div>
+          `;
+          ulMenu.insertBefore(editLi, ulMenu.firstElementChild);
+
+          editLi.addEventListener('click', (e) => {
+            e.preventDefault();
+            // 편집 모드로 전환
+            editCommentInPlace(li, c, discussId);
+          });
+        }
+      }
+    }
+
+    return li;
+  }
+
+  // ▼▼▼ (추가) "메뉴 텍스트가 없으면 강제로 다시 넣어주는" 함수 ▼▼▼
+  function ensureMenuTexts() {
+    // 1) "신고하기" 버튼이 비어 있으면 강제 채움
+    document.querySelectorAll('.report-button[data-discuss-id]').forEach((a) => {
+      if (!a.textContent.trim()) {
+        a.textContent = '신고하기';
+      }
+    });
+    // 2) "게시글로 이동" 항목이 비어 있으면 강제 채움
+    document.querySelectorAll('ul.css-1v3ka1a.e1wvddxk0 a[href^="https://playentry.org/community/entrystory/"]').forEach((a) => {
+      if (a.href.includes('/community/entrystory/') && !a.textContent.trim()) {
+        a.textContent = '게시글로 이동';
+      }
+    });
+    // 3) "수정하기" 링크(글)
+    document.querySelectorAll('a.edit-button[data-discuss-id]').forEach((a) => {
+      if (!a.textContent.trim()) {
+        a.textContent = '수정하기';
+      }
+    });
+    // 4) "수정하기" 링크(댓글) => .comment-edit-button
+    document.querySelectorAll('a.comment-edit-button[data-comment-id]').forEach((a) => {
+      if (!a.textContent.trim()) {
+        a.textContent = '수정하기';
+      }
+    });
+    // 5) "더보기" 버튼
+    document.querySelectorAll('.css-9ktsbr.e12alrlo1').forEach((a) => {
+      if (!a.textContent.trim()) {
+        a.textContent = '더보기';
+      }
+    });
+  }
+  // ▲▲▲ ensureMenuTexts() 끝 ▲▲▲
+
+  // 1초마다 전체 글 목록 + 댓글 갱신
+  let olderSearchAfter = null;
   (function initTokensAndStart() {
     const { csrfToken, xToken } = getTokensFromDom();
     requestOptions.headers["csrf-token"] = csrfToken;
     requestOptions.headers["x-token"] = xToken;
+
+    // ★ [추가] 기존 사이트 li를 제거하는 함수
+    function removeOldSiteLis(targetUl) {
+      const allLi = targetUl.querySelectorAll('li');
+      allLi.forEach(li => {
+        // data-from-extension 이 없으면 (원본 사이트가 만든 li) -> 제거
+        if (!li.hasAttribute('data-from-extension')) {
+          li.remove();
+        }
+      });
+    }
 
     mainIntervalId = setInterval(async () => {
       if (!extensionEnabled) {
@@ -1327,43 +2188,81 @@ function startEntrystoryScript() {
           if (targetUl) {
             for (let i = discussList.length - 1; i >= 0; i--) {
               const item = discussList[i];
-              const signature = createSignatureFromItem(item);
+              const signature = item.id;
               knownIds.add(signature);
               const li = makeCollapsedLi(item);
               targetUl.prepend(li);
             }
+            // ★ 첫 로딩 시점에, 기존 사이트의 li 를 싹 제거
+            removeOldSiteLis(targetUl);
           }
           isFirstFetch = false;
         } else {
-          // 기존 목록 갱신
+          // 기존 목록 갱신 (좋아요수,댓글수 등)
           for (let i = 0; i < discussList.length; i++) {
-            updateDiscussItemInDom(discussList[i]);
+            const updatedItem = discussList[i];
+            updateDiscussItemInDom(updatedItem);
           }
           // 새 글 추가
-          for (let i = discussList.length - 1; i >= 0; i--) {
-            const item = discussList[i];
-            const itemSignature = createSignatureFromItem(item);
-            if (!knownIds.has(itemSignature)) {
-              knownIds.add(itemSignature);
-              const targetUl = document.querySelector("ul.css-1urx3um.e18x7bg03");
-              if (targetUl) {
+          const targetUl = document.querySelector("ul.css-1urx3um.e18x7bg03");
+          if (targetUl) {
+            for (let i = discussList.length - 1; i >= 0; i--) {
+              const item = discussList[i];
+              if (!knownIds.has(item.id)) {
+                knownIds.add(item.id);
                 const li = makeCollapsedLi(item);
                 targetUl.prepend(li);
               }
             }
+            // ★ 새 아이템 추가 후에도, 원본 li 제거
+            removeOldSiteLis(targetUl);
           }
         }
       } catch (err) {}
 
-      // 열려있는 댓글도 갱신
+      // 열려있는 댓글 갱신 (모든 댓글 끝까지 본 상태일 때만)
       const openCommentSections = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li .css-4e8bhg.euhmxlr2");
       openCommentSections.forEach((section) => {
         const li = section.closest('li');
         if (li && li.__itemData && li.__itemData.id) {
-          refetchCommentsAndUpdate(li.__itemData.id);
+          const loadMoreBtn = section.querySelector('.reply_more');
+          if (!loadMoreBtn || loadMoreBtn.style.display === 'none') {
+            refetchCommentsAndUpdate(li.__itemData.id);
+          }
         }
       });
+
+      // (중요) "메뉴 텍스트" 강제 보정
+      ensureMenuTexts();
     }, 1000);
+
+    // "더 오래된 글" 버튼 클릭
+    document.addEventListener("click", function(e) {
+      if (e.target.matches('.css-qtq074.e18x7bg02')) {
+        e.preventDefault();
+        if (!olderSearchAfter) {
+          console.log("더 이상 불러올 글이 없습니다.(searchAfter=null)");
+          return;
+        }
+        fetchOlderEntrystories(olderSearchAfter).then((result) => {
+          if (result && result.list && result.list.length > 0) {
+            const ulEl = document.querySelector("ul.css-1urx3um.e18x7bg03");
+            if (ulEl) {
+              result.list.forEach((item) => {
+                if (!knownIds.has(item.id)) {
+                  knownIds.add(item.id);
+                  const li = makeCollapsedLi(item);
+                  ulEl.append(li);
+                }
+              });
+            }
+            olderSearchAfter = result.searchAfter || null;
+          }
+        }).catch((err) => {
+          console.error("더 오래된 글 불러오기 실패:", err);
+        });
+      }
+    }, true);
 
     function fetchOlderEntrystories(sa) {
       const req = JSON.parse(JSON.stringify(requestOptions));
@@ -1403,39 +2302,6 @@ function startEntrystoryScript() {
           };
         });
     }
-
-    document.addEventListener("click", function(e) {
-      if (e.target.matches('.css-qtq074.e18x7bg02')) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-
-        if (!olderSearchAfter) {
-          console.log("더 이상 불러올 글이 없습니다.(searchAfter=null)");
-          return false;
-        }
-        fetchOlderEntrystories(olderSearchAfter).then((result) => {
-          if (result && result.list && result.list.length > 0) {
-            const ulEl = document.querySelector("ul.css-1urx3um.e18x7bg03");
-            if (ulEl) {
-              result.list.forEach((item) => {
-                const signature = createSignatureFromItem(item);
-                if (!knownIds.has(signature)) {
-                  knownIds.add(signature);
-                  const li = makeCollapsedLi(item);
-                  ulEl.append(li);
-                }
-              });
-            }
-            olderSearchAfter = result.searchAfter || null;
-          }
-        }).catch((err) => {
-          console.error("더 오래된 글 불러오기 실패:", err);
-        });
-        
-        return false;
-      }
-    }, true);
   })();
 
   (function injectCommentCss() {
@@ -1499,7 +2365,7 @@ function startEntrystoryScript() {
           refetchCommentsAndUpdate(discussIdIfComment);
         }
       })
-      .catch((err) => {});
+      .catch(() => {});
   }
 
   function unlikeDiscuss(targetId, buttonEl, targetSubject, discussIdIfComment) {
@@ -1548,7 +2414,7 @@ function startEntrystoryScript() {
           refetchCommentsAndUpdate(discussIdIfComment);
         }
       })
-      .catch((err) => {});
+      .catch(() => {});
   }
 
   /***************************************************************
@@ -1621,12 +2487,12 @@ function startEntrystoryScript() {
         return res.json();
       })
       .then(() => {
-        // ----- BugFix: 댓글 작성 성공 후 스티커ID 초기화 -----
+        // 댓글 작성 성공 후 스티커ID 초기화
         window.__selectedStickerId = null;
 
         return refetchCommentsAndUpdate(discussId);
       })
-      .catch((err) => {
+      .catch(() => {
         alert("댓글 달기에 실패했습니다. 잠시 후 다시 시도해주세요.");
       });
   }
@@ -1669,392 +2535,9 @@ function startEntrystoryScript() {
           updateDiscussItemInDom(updatedItem);
         });
       })
-      .catch((err) => {});
+      .catch(() => {});
   }
 
-  /***************************************************************
-   * 댓글 섹션 / 갱신
-   ***************************************************************/
-  function createCommentSectionHTML(item, commentsArray) {
-    const commentLis = commentsArray.map((c) => {
-      const cUserId = c.user?.id || "";
-      const cUserName = c.user?.nickname || "NoName";
-      const cDate = formatDate(c.created);
-
-      const safeContent = sanitizeUserContent(c.content || "");
-      const cHtml = convertLinks(safeContent);
-      const cLike = c.likesLength || 0;
-      const cLikeClass = c.isLike ? "like active" : "like";
-
-      let cBg = 'background-image: url("/img/EmptyImage.svg");';
-      const cPf = c?.user?.profileImage;
-      if (cPf && cPf.filename && cPf.filename.length >= 4) {
-        const ccSub1 = cPf.filename.substring(0, 2);
-        const ccSub2 = cPf.filename.substring(2, 4);
-        if (cPf.imageType) {
-          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}.${cPf.imageType}'), url('/img/EmptyImage.svg');`;
-        } else {
-          cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}'), url('/img/EmptyImage.svg');`;
-        }
-      }
-
-      let cUserMarkHtml = "";
-      const cMark = c?.user?.mark;
-      if (cMark && cMark.filename && cMark.filename.length >= 4) {
-        const cmSub1 = cMark.filename.substring(0, 2);
-        const cmSub2 = cMark.filename.substring(2, 4);
-        let cMarkUrl = `/uploads/${cmSub1}/${cmSub2}/${cMark.filename}`;
-        if (cMark.imageType) {
-          cMarkUrl += `.${cMark.imageType}`;
-        }
-        cUserMarkHtml = `
-          <span class="css-1b1jxqs ee2n3ac2"
-            style="background-image: url('${cMarkUrl}'), url('/img/EmptyImage.svg');
-                   display: inline-block; 
-                   font-size: 14px; 
-                   font-weight: 600; 
-                   color: rgb(255, 255, 255); 
-                   line-height: 16px; 
-                   vertical-align: top;">
-            <span class="blind">${cMark.name || "마크"}</span>
-          </span>
-        `.trim();
-      }
-
-      let cStickerHtml = "";
-      if (c.sticker && c.sticker.filename && c.sticker.filename.length >= 4) {
-        const cStSub1 = c.sticker.filename.substring(0, 2);
-        const cStSub2 = c.sticker.filename.substring(2, 4);
-        let cStUrl = `/uploads/${cStSub1}/${cStSub2}/${c.sticker.filename}`;
-        if (c.sticker.imageType) {
-          cStUrl += `.${c.sticker.imageType}`;
-        }
-        cStickerHtml = `
-          <em class="css-18ro4ma e1877mpo0">
-            <img src="${cStUrl}" alt="sticker" style="width: 74px; height: 74px;">
-          </em>
-        `.trim();
-      }
-
-      return `
-<li class="css-u1nrp7 e9nkex10">
-  <div class="css-uu8yq6 e3yf6l22">
-    <a class="css-16djw2l enx4swp0" href="/profile/${cUserId}" style="${cBg}">
-      <span class="blind">유저 썸네일</span>
-    </a>
-    <div class="css-1t19ptn ee2n3ac5">
-      <a href="/profile/${cUserId}">
-        ${cUserMarkHtml}${cUserName}
-      </a>
-      <em>${cDate}</em>
-    </div>
-    <div class="css-6wq60h e1i41bku1">
-      ${cHtml}
-    </div>
-    ${cStickerHtml}
-    <div class="css-1dcwahm e15ke9c50">
-      <em><a role="button" class="${cLikeClass}" data-comment-id="${c.id}">좋아요 ${cLike}</a></em>
-    </div>
-    <div class="css-13q8c66 e12alrlo2">
-      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
-        <span class="blind">더보기</span>
-      </a>
-      <div class="css-19v4su1 e12alrlo0">
-        <div class="css-1v3ka1a e1wvddxk0">
-          <ul>
-            <li><a href="https://playentry.org/community/entrystory/${item.id}/">게시글로 이동</a></li>
-          </ul>
-          <span class="css-1s3ybmc e1wvddxk1"><i>&nbsp;</i></span>
-        </div>
-      </div>
-    </div>
-  </div>
-</li>
-      `.trim();
-    }).join("");
-
-    return `
-<div class="css-4e8bhg euhmxlr2">
-  <ul class="css-1e7cskh euhmxlr1">
-    ${commentLis}
-  </ul>
-  <div class="css-ahy3yn euhmxlr3">
-    <div class="css-1cyfuwa e1h77j9v12">
-      <div class="css-11v8s45 e1h77j9v1">
-        <textarea id="Write" name="Write" placeholder="댓글을 입력해 주세요" style="height: 22px !important;"></textarea>
-      </div>
-      <div class="css-fjfa6z e1h77j9v3" style="display: none;">
-        <em>
-          <img src="" alt="댓글 첨부 스티커" style="width: 105px; height: 105px;">
-          <a href="/" role="button" class="btn-close-sticker">
-            <span class="blind">스티커 닫기</span>
-          </a>
-        </em>
-      </div>
-      <div class="css-ljggwk e1h77j9v9">
-        <div class="css-109f9np e1h77j9v7">
-          <a role="button" class="css-1394o6u e1h77j9v5">
-            <span class="blind">스티커</span>
-          </a>
-          ${createStickerPopupHtml()}
-        </div>
-        <span class="css-11ofcmn e1h77j9v8">
-          <a href="/" data-btn-type="login" data-testid="button"
-             class="css-1adjw8a e13821ld2">등록</a>
-        </span>
-      </div>
-    </div>
-    <a href="/" role="button" class="active css-rb1pwc euhmxlr0">
-      답글 접기
-    </a>
-  </div>
-</div>
-    `.trim();
-  }
-
-  async function fetchCommentsThenExpand(collapsedLi) {
-    const item = collapsedLi.__itemData;
-    const comments = await fetchComments(item.id);
-
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = createCommentSectionHTML(item, comments);
-    const commentSection = tempDiv.firstElementChild;
-
-    const closeBtn = commentSection.querySelector('.css-rb1pwc.euhmxlr0');
-    if (closeBtn) {
-      closeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        revertToCollapsed(collapsedLi);
-      });
-    }
-
-    const commentLikeBtns = commentSection.querySelectorAll('a.like[data-comment-id]');
-    commentLikeBtns.forEach((btn) => {
-      btn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        const cId = btn.getAttribute('data-comment-id');
-        const cData = comments.find(cc => cc.id === cId);
-        if (!cData) return;
-        if (cData.isLike) {
-          unlikeDiscuss(cData.id, btn, "comment", item.id);
-        } else {
-          likeDiscuss(cData.id, btn, "comment", item.id);
-        }
-      });
-    });
-
-    setupStickerUiEvents(commentSection);
-
-    const registerBtn = commentSection.querySelector('a.css-1adjw8a.e13821ld2');
-    if (registerBtn) {
-      registerBtn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        const textarea = commentSection.querySelector('textarea#Write');
-        if (!textarea) return;
-        const content = textarea.value.trim();
-        const stickerId = window.__selectedStickerId || null;
-        if (!content && !stickerId) {
-          alert("댓글 내용을 입력해 주세요 (또는 스티커만 등록 가능).");
-          return;
-        }
-        createComment(item.id, content, stickerId).then(() => {
-          textarea.value = "";
-          resetStickerSelection(commentSection);
-        });
-      });
-    }
-
-    const commentMoreBtns = commentSection.querySelectorAll('.css-9ktsbr.e12alrlo1');
-    commentMoreBtns.forEach((btn) => {
-      btn.addEventListener('click', (ev) => {
-        ev.preventDefault();
-        btn.classList.toggle('active');
-        const nextDiv = btn.parentNode.querySelector('.css-19v4su1.e12alrlo0')
-                      || btn.parentNode.querySelector('.css-16el6fj.e12alrlo0');
-        if (nextDiv) {
-          if (nextDiv.classList.contains('css-19v4su1')) {
-            nextDiv.classList.remove('css-19v4su1');
-            nextDiv.classList.add('css-16el6fj');
-          } else {
-            nextDiv.classList.remove('css-16el6fj');
-            nextDiv.classList.add('css-19v4su1');
-          }
-        }
-      });
-    });
-
-    collapsedLi.appendChild(commentSection);
-    reInjectInlineScripts(commentSection);
-  }
-
-  function revertToCollapsed(li) {
-    const commentSection = li.querySelector('.css-4e8bhg.euhmxlr2');
-    if (commentSection) {
-      commentSection.remove();
-    }
-  }
-
-  function refetchCommentsAndUpdate(discussId) {
-    return fetchComments(discussId).then((newComments) => {
-      const allLis = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li");
-      let targetLi = null;
-      allLis.forEach((li) => {
-        if (li.__itemData && li.__itemData.id === discussId) {
-          targetLi = li;
-        }
-      });
-      if (!targetLi) {
-        return;
-      }
-
-      const commentSection = targetLi.querySelector('.css-4e8bhg.euhmxlr2');
-      if (!commentSection) {
-        return;
-      }
-
-      const commentUl = commentSection.querySelector('.css-1e7cskh.euhmxlr1');
-      if (!commentUl) {
-        return;
-      }
-
-      const newCommentLisHtml = newComments.map((c) => {
-        const cUserId = c.user?.id || "";
-        const cUserName = c.user?.nickname || "NoName";
-        const cDate = formatDate(c.created);
-
-        const safeContent = sanitizeUserContent(c.content || "");
-        const cHtml = convertLinks(safeContent);
-        const cLike = c.likesLength || 0;
-        const cLikeClass = c.isLike ? "like active" : "like";
-
-        let cBg = 'background-image: url("/img/EmptyImage.svg");';
-        const cPf = c?.user?.profileImage;
-        if (cPf && cPf.filename && cPf.filename.length >= 4) {
-          const ccSub1 = cPf.filename.substring(0, 2);
-          const ccSub2 = cPf.filename.substring(2, 4);
-          if (cPf.imageType) {
-            cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}.${cPf.imageType}'), url('/img/EmptyImage.svg');`;
-          } else {
-            cBg = `background-image: url('/uploads/${ccSub1}/${ccSub2}/${cPf.filename}'), url('/img/EmptyImage.svg');`;
-          }
-        }
-
-        let cUserMarkHtml = "";
-        const cMark = c?.user?.mark;
-        if (cMark && cMark.filename && cMark.filename.length >= 4) {
-          const cmSub1 = cMark.filename.substring(0, 2);
-          const cmSub2 = cMark.filename.substring(2, 4);
-          let cMarkUrl = `/uploads/${cmSub1}/${cmSub2}/${cMark.filename}`;
-          if (cMark.imageType) {
-            cMarkUrl += `.${cMark.imageType}`;
-          }
-          cUserMarkHtml = `
-            <span class="css-1b1jxqs ee2n3ac2"
-              style="background-image: url('${cMarkUrl}'), url('/img/EmptyImage.svg');
-                     display: inline-block; 
-                     font-size: 14px; 
-                     font-weight: 600; 
-                     color: rgb(255, 255, 255); 
-                     line-height: 16px; 
-                     vertical-align: top;">
-              <span class="blind">${cMark.name || "마크"}</span>
-            </span>
-          `.trim();
-        }
-
-        let cStickerHtml = "";
-        if (c.sticker && c.sticker.filename && c.sticker.filename.length >= 4) {
-          const cStSub1 = c.sticker.filename.substring(0, 2);
-          const cStSub2 = c.sticker.filename.substring(2, 4);
-          let cStUrl = `/uploads/${cStSub1}/${cStSub2}/${c.sticker.filename}`;
-          if (c.sticker.imageType) {
-            cStUrl += `.${c.sticker.imageType}`;
-          }
-          cStickerHtml = `
-            <em class="css-18ro4ma e1877mpo0">
-              <img src="${cStUrl}" alt="sticker" style="width: 74px; height: 74px;">
-            </em>
-          `.trim();
-        }
-
-        return `
-<li class="css-u1nrp7 e9nkex10">
-  <div class="css-uu8yq6 e3yf6l22">
-    <a class="css-16djw2l enx4swp0" href="/profile/${cUserId}" style="${cBg}">
-      <span class="blind">유저 썸네일</span>
-    </a>
-    <div class="css-1t19ptn ee2n3ac5">
-      <a href="/profile/${cUserId}">
-        ${cUserMarkHtml}${cUserName}
-      </a>
-      <em>${cDate}</em>
-    </div>
-    <div class="css-6wq60h e1i41bku1">
-      ${cHtml}
-    </div>
-    ${cStickerHtml}
-    <div class="css-1dcwahm e15ke9c50">
-      <em><a role="button" class="${cLikeClass}" data-comment-id="${c.id}">좋아요 ${cLike}</a></em>
-    </div>
-    <div class="css-13q8c66 e12alrlo2">
-      <a href="/" role="button" class="css-9ktsbr e12alrlo1" style="display: block;">
-        <span class="blind">더보기</span>
-      </a>
-      <div class="css-19v4su1 e12alrlo0">
-        <div class="css-1v3ka1a e1wvddxk0">
-          <ul>
-            <li><a href="https://playentry.org/community/entrystory/${discussId}/">게시글로 이동</a></li>
-          </ul>
-          <span class="css-1s3ybmc e1wvddxk1"><i>&nbsp;</i></span>
-        </div>
-      </div>
-    </div>
-  </div>
-</li>
-        `.trim();
-      }).join("");
-
-      commentUl.innerHTML = newCommentLisHtml;
-
-      const newLikeBtns = commentUl.querySelectorAll('a.like[data-comment-id]');
-      newLikeBtns.forEach((btnEl) => {
-        const cId = btnEl.getAttribute('data-comment-id');
-        const cData = newComments.find((cc) => cc.id === cId);
-        btnEl.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          if (!cData) return;
-          if (cData.isLike) {
-            unlikeDiscuss(cData.id, btnEl, "comment", discussId);
-          } else {
-            likeDiscuss(cData.id, btnEl, "comment", discussId);
-          }
-        });
-      });
-
-      const newMoreBtns = commentUl.querySelectorAll('.css-9ktsbr.e12alrlo1');
-      newMoreBtns.forEach((btn) => {
-        btn.addEventListener('click', (ev) => {
-          ev.preventDefault();
-          btn.classList.toggle('active');
-          const nextDiv = btn.parentNode.querySelector('.css-19v4su1.e12alrlo0')
-                        || btn.parentNode.querySelector('.css-16el6fj.e12alrlo0');
-          if (nextDiv) {
-            if (nextDiv.classList.contains('css-19v4su1')) {
-              nextDiv.classList.remove('css-19v4su1');
-              nextDiv.classList.add('css-16el6fj');
-            } else {
-              nextDiv.classList.remove('css-16el6fj');
-              nextDiv.classList.add('css-19v4su1');
-            }
-          }
-        });
-      });
-
-      reInjectInlineScripts(commentUl);
-    });
-  }
-
-  // updateDiscussItemInDom: 실시간 갱신(좋아요/댓글수 등)
   function updateDiscussItemInDom(updatedItem) {
     const lis = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li");
     let foundLi = null;
@@ -2077,31 +2560,102 @@ function startEntrystoryScript() {
       replyBtn.textContent = `댓글 ${updatedItem.commentsLength || 0}`;
     }
 
-    // item.content 등도 실시간 반영하려면 아래 부분 추가 가능
     foundLi.__itemData = updatedItem;
   }
 
   /***************************************************************
-   * [추가] 여기서부터 ‘더보기’ 메뉴가 열려 있을 때, 
-   *        배경(바깥) 클릭 시 자동으로 닫히도록 처리
+   * 열려있는 댓글의 부분 업데이트
+   ***************************************************************/
+  function refetchCommentsAndUpdate(discussId) {
+    const liList = document.querySelectorAll("ul.css-1urx3um.e18x7bg03 li");
+    let targetLi = null;
+    liList.forEach((li) => {
+      if (li.__itemData && li.__itemData.id === discussId) {
+        const commentSection = li.querySelector('.css-4e8bhg.euhmxlr2');
+        if (commentSection) {
+          targetLi = li;
+        }
+      }
+    });
+    if (!targetLi) return;
+
+    const oldComments = window.__commentCacheForComments[discussId] || [];
+
+    return fetchComments(discussId, null).then((newComments) => {
+      const commentSection = targetLi.querySelector('.css-4e8bhg.euhmxlr2');
+      if (!commentSection) return;
+
+      const commentUl = commentSection.querySelector('.css-1e7cskh.euhmxlr1');
+      if (!commentUl) return;
+
+      // 새 목록 기준으로 부분 갱신
+      const existingLis = commentUl.querySelectorAll('li.css-u1nrp7.e9nkex10');
+      const domMap = new Map();
+      existingLis.forEach((liEl) => {
+        const likeBtn = liEl.querySelector('[data-comment-id]');
+        if (!likeBtn) return;
+        const cId = likeBtn.getAttribute('data-comment-id');
+        domMap.set(cId, liEl);
+      });
+
+      newComments.forEach((c) => {
+        const oldLi = domMap.get(c.id);
+        const oldOne = oldComments.find(oc => oc.id === c.id);
+
+        // 새 댓글
+        if (!oldLi) {
+          // 혹시 편집중인 댓글과 ID가 충돌하면 건너뜀
+          if (window.__editingCommentSet.has(c.id)) {
+            return;
+          }
+          const newLi = createSingleCommentLi(c, discussId);
+          commentUl.appendChild(newLi);
+          domMap.set(c.id, newLi);
+        } else {
+          // 편집중 댓글이면 DOM 갱신 스킵
+          if (window.__editingCommentSet.has(c.id)) {
+            return;
+          }
+
+          // 내용이 달라졌다면 통째로 교체
+          if (oldOne && oldOne.content !== c.content) {
+            const newLi = createSingleCommentLi(c, discussId);
+            commentUl.replaceChild(newLi, oldLi);
+            domMap.set(c.id, newLi);
+          } else {
+            // 내용은 동일 -> 좋아요 정보만 반영
+            const likeBtn = oldLi.querySelector(`a.like[data-comment-id="${c.id}"]`);
+            if (likeBtn) {
+              likeBtn.textContent = `좋아요 ${c.likesLength || 0}`;
+              if (c.isLike) likeBtn.classList.add('active');
+              else likeBtn.classList.remove('active');
+            }
+            // 교체 없으므로 기존 oldLi 그대로 유지
+            domMap.set(c.id, oldLi);
+          }
+        }
+      });
+
+      // 캐시 갱신
+      window.__commentCacheForComments[discussId] = newComments;
+
+      reInjectInlineScripts(commentUl);
+    });
+  }
+
+  /***************************************************************
+   * [추가] 더보기 메뉴 바깥 클릭 시 닫기
    ***************************************************************/
   if (!docClickHandlerForMoreMenus) {
     docClickHandlerForMoreMenus = function(e) {
-      // 현재 활성화(열려있는) 상태인 .css-9ktsbr.e12alrlo1 찾아서
-      // 바깥을 클릭했다면 닫기
       const openMenus = document.querySelectorAll('.css-9ktsbr.e12alrlo1.active');
       openMenus.forEach((moreBtn) => {
-        // 더보기 컨테이너
         const nextDiv = moreBtn.parentNode.querySelector('.css-16el6fj.e12alrlo0')
                       || moreBtn.parentNode.querySelector('.css-19v4su1.e12alrlo0');
 
-        // 클릭이 moreBtn 영역 안이나 nextDiv 안에 속하면 그대로 두고,
-        // 그 외(바깥)라면 닫는다.
         if (nextDiv && !moreBtn.contains(e.target) && !nextDiv.contains(e.target)) {
-          // 더보기 비활성화
           moreBtn.classList.remove('active');
           if (nextDiv.classList.contains('css-16el6fj')) {
-            // 현재 열려있는 상태를 닫기
             nextDiv.classList.remove('css-16el6fj');
             nextDiv.classList.add('css-19v4su1');
           }
@@ -2112,9 +2666,6 @@ function startEntrystoryScript() {
   }
 }
 
-/*******************************************************************
- * 3) [추가] "메인 스크립트"를 중단(stop)하는 함수
- *******************************************************************/
 function stopEntrystoryScript() {
   if (!scriptStarted) return;
   scriptStarted = false;
@@ -2144,7 +2695,6 @@ function handleUrlChangeForEntrystory() {
       const parent = oldUl.parentElement;
       if (parent) {
         oldUl.remove();
-        // 새 UL을 만들어 부모에 다시 삽입
         const newUl = document.createElement("ul");
         newUl.className = "css-1urx3um e18x7bg03";
         parent.appendChild(newUl);
@@ -2153,7 +2703,6 @@ function handleUrlChangeForEntrystory() {
   }
 
   if (isValidEntrystoryUrl() && extensionEnabled) {
-    // 매번 stop 후 재시작
     stopEntrystoryScript();
     startEntrystoryScript();
   } else {
@@ -2161,8 +2710,8 @@ function handleUrlChangeForEntrystory() {
   }
 }
 
+// urlchange 이벤트는 이미 위에서 등록됨
 window.addEventListener('urlchange', handleUrlChangeForEntrystory);
-handleUrlChangeForEntrystory();
 
 /*******************************************************************
  * 5) [추가] 신고하기 모달(“정말로 신고할까요?”)을 띄우는 함수
@@ -2222,3 +2771,26 @@ function openReportModal(discussId) {
     popupEl.style.display = 'block';
   }
 }
+
+/*******************************************************************
+ * [변경] "새로고침 완료"된 뒤에만 handleUrlChangeForEntrystory() 실행
+ *     => beforeunload 시점 코드 제거
+ *******************************************************************/
+
+// => load 시점: 새 페이지가 완전히 로딩된 후에 실행
+window.addEventListener('load', function() {
+  handleUrlChangeForEntrystory();
+});
+
+// (기존 pageshow/pagehide/visibilitychange 등 유지)
+window.addEventListener('pageshow', () => {
+  handleUrlChangeForEntrystory();
+});
+window.addEventListener('pagehide', () => {
+  handleUrlChangeForEntrystory();
+});
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    handleUrlChangeForEntrystory();
+  }
+});

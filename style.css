@@ -682,3 +682,36 @@
   float: right;
   width: 110px;
 }
+.css-ahy3yn .reply_more {
+  display: block;
+  overflow: hidden;
+  box-sizing: border-box;
+  width: 142px;
+  height: 36px;
+  margin: 0px auto;
+  border: 1px solid rgb(216, 216, 216);
+  border-radius: 18px;
+  background-color: rgb(251, 251, 251);
+  font-size: 14px;
+  font-weight: 600;
+  color: rgb(151, 151, 151);
+  text-align: center;
+  line-height: 36px;
+}
+.css-ahy3yn .reply_more::after {
+  display: inline-block;
+  overflow: hidden;
+  width: 10px;
+  height: 6px;
+  margin: 14px 0px 0px 9px;
+  background-image: url(https://playentry.org/img/IcoTextArrow9.svg);
+  background-size: 10px;
+  transform: rotate(180deg);
+  vertical-align: top;
+  content: "";
+}
+.css-f41j3c {
+  padding: 27px;
+  background-color: rgb(250, 250, 250);
+  border-top: 1px solid rgb(233, 233, 233);
+}
