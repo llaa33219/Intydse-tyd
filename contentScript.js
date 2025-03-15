@@ -2789,8 +2789,3 @@ window.addEventListener('pageshow', () => {
 window.addEventListener('pagehide', () => {
   handleUrlChangeForEntrystory();
 });
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
-    handleUrlChangeForEntrystory();
-  }
-});
