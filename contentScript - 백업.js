@@ -25,6 +25,126 @@ if (!window.__editingCommentSet) {
   window.__editingCommentSet = new Set();
 }
 
+// -------------------------------------------------------------
+// (추가) x토큰 저장용 변수
+// -------------------------------------------------------------
+if (!window.__xTokenData) {
+  window.__xTokenData = {
+    privateToken: null,
+    xToken: null,
+    lastUpdated: null
+  };
+}
+
+// -------------------------------------------------------------
+// (추가) XMLHttpRequest.prototype.setPrivateToken 메서드 모니터링
+// -------------------------------------------------------------
+(function() {
+  // 원본 setPrivateToken 메서드 저장
+  const originalSetPrivateToken = XMLHttpRequest.prototype.setPrivateToken;
+  
+  // setPrivateToken 메서드 오버라이드
+  XMLHttpRequest.prototype.setPrivateToken = function(privateToken) {
+    // 토큰 데이터 저장
+    if (privateToken) {
+      try {
+        window.__xTokenData.privateToken = privateToken;
+        window.__xTokenData.lastUpdated = new Date().toISOString();
+        
+        // 토큰 정보를 콘솔에 로깅
+        console.log('[Entry Extension] Private Token detected:', privateToken);
+        
+        // 토큰 정보를 background.js로 전송
+        chrome.runtime.sendMessage({
+          action: "xTokenDetected",
+          data: {
+            privateToken: privateToken,
+            timestamp: window.__xTokenData.lastUpdated
+          }
+        });
+      } catch (e) {
+        console.error('[Entry Extension] Error processing private token:', e);
+      }
+    }
+    
+    // 원본 메서드 호출
+    return originalSetPrivateToken.apply(this, arguments);
+  };
+  
+  // 원본 fetch 메서드 저장
+  const originalFetch = window.fetch;
+  
+  // fetch 메서드 오버라이드
+  window.fetch = function(url, options = {}) {
+    // x-token 헤더가 있는지 확인
+    if (options && options.headers) {
+      const headers = options.headers;
+      let xToken = null;
+      
+      // Headers 객체인 경우
+      if (headers instanceof Headers) {
+        xToken = headers.get('x-token');
+      } 
+      // 일반 객체인 경우
+      else if (typeof headers === 'object') {
+        xToken = headers['x-token'] || headers['X-Token'];
+      }
+      
+      // x-token이 있으면 저장
+      if (xToken && xToken !== window.__xTokenData.xToken) {
+        window.__xTokenData.xToken = xToken;
+        window.__xTokenData.lastUpdated = new Date().toISOString();
+        
+        // 토큰 정보를 콘솔에 로깅
+        console.log('[Entry Extension] X-Token detected in fetch:', xToken);
+        
+        // 토큰 정보를 background.js로 전송
+        chrome.runtime.sendMessage({
+          action: "xTokenDetected",
+          data: {
+            xToken: xToken,
+            timestamp: window.__xTokenData.lastUpdated
+          }
+        });
+      }
+    }
+    
+    // 원본 fetch 호출
+    return originalFetch.apply(this, arguments);
+  };
+  
+  // XMLHttpRequest의 setRequestHeader 메서드 오버라이드
+  const originalSetRequestHeader = XMLHttpRequest.prototype.setRequestHeader;
+  XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+    // 헤더 저장
+    if (!this._headers) this._headers = {};
+    this._headers[name.toLowerCase()] = value;
+    
+    // x-token 헤더인 경우 저장
+    if (name.toLowerCase() === 'x-token' && value !== window.__xTokenData.xToken) {
+      window.__xTokenData.xToken = value;
+      window.__xTokenData.lastUpdated = new Date().toISOString();
+      
+      // 토큰 정보를 콘솔에 로깅
+      console.log('[Entry Extension] X-Token detected in setRequestHeader:', value);
+      
+      // 토큰 정보를 background.js로 전송
+      chrome.runtime.sendMessage({
+        action: "xTokenDetected",
+        data: {
+          xToken: value,
+          timestamp: window.__xTokenData.lastUpdated
+        }
+      });
+    }
+    
+    // 원본 메서드 호출
+    return originalSetRequestHeader.apply(this, arguments);
+  };
+  
+  console.log('[Entry Extension] Token monitoring initialized');
+})();
+
 // 1) 초기 로딩
 chrome.storage.sync.get(
   ["enableExtension", "allowHtml", "allowMarkdown", "allowJs"],
@@ -73,6 +193,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === "disableScript") {
     extensionEnabled = false;
     stopEntrystoryScript();
+  } else if (request.action === "getXTokenData") {
+    // x토큰 데이터 요청에 응답
+    sendResponse({
+      xTokenData: window.__xTokenData
+    });
+    return true; // 비동기 응답을 위해 true 반환
   }
 });
 
@@ -361,20 +487,81 @@ function startEntrystoryScript() {
     let csrfToken = "";
     let xToken = "";
 
+    // CSRF 토큰 가져오기
     const metaTag = document.querySelector('meta[name="csrf-token"]');
     if (metaTag) {
       csrfToken = metaTag.getAttribute('content') || "";
     }
 
+    // 로그인 상태 확인 (여러 방법으로 시도)
+    let isLoggedIn = false;
+      
+    // 방법 1: __NEXT_DATA__ 확인
     const nextDataScript = document.querySelector('#__NEXT_DATA__');
     if (nextDataScript) {
       try {
         const json = JSON.parse(nextDataScript.textContent);
-        // xToken: props.initialState.common.user.xToken
-        xToken = json?.props?.initialState?.common?.user?.xToken || "";
-      } catch (e) {}
+        isLoggedIn = isLoggedIn || (json?.props?.initialState?.common?.user !== null);
+        
+        // __NEXT_DATA__에서 x토큰 가져오기 시도
+        if (json?.props?.initialState?.common?.user) {
+          xToken = json.props.initialState.common.user.xToken || "";
+        }
+      } catch (e) {
+        console.error('[Entry Extension] __NEXT_DATA__ 파싱 오류:', e);
+      }
     }
-    return { csrfToken, xToken };
+    
+    // 방법 2: 로그인 버튼 존재 여부 확인 (없으면 로그인된 상태)
+    const loginButton = document.querySelector('a[href="/signin"]');
+    isLoggedIn = isLoggedIn || (loginButton === null);
+    
+    // 방법 3: 프로필 요소 확인
+    const profileElement = document.querySelector('a[href*="/profile"]');
+    isLoggedIn = isLoggedIn || (profileElement !== null);
+    
+    console.log('[Entry Extension] 로그인 상태 확인 결과:', isLoggedIn ? '로그인됨' : '로그인되지 않음');
+    
+    // 방법 4: ETR_CHK 쿠키를 x토큰으로 사용 (중요: 로그인된 상태에서만 유효)
+    if (isLoggedIn && (!xToken || xToken === "")) {
+      // 쿠키에서 ETR_CHK 값 가져오기
+      const etrChkCookie = getCookieValue('ETR_CHK');
+      if (etrChkCookie) {
+        // 따옴표 제거 처리
+        let cleanToken = etrChkCookie;
+        if (cleanToken.startsWith('"') && cleanToken.endsWith('"')) {
+          cleanToken = cleanToken.substring(1, cleanToken.length - 1);
+        }
+        console.log('[Entry Extension] ETR_CHK 쿠키를 x토큰으로 사용:', cleanToken.substring(0, 10) + '...');
+        xToken = cleanToken;
+      }
+    }
+    
+    // x토큰을 찾은 경우 저장
+    if (xToken) {
+      console.log('[Entry Extension] x토큰 찾음:', xToken.substring(0, 10) + '...');
+      
+      // 토큰 정보 전역 변수에 저장
+      if (!window.__xTokenData) {
+        window.__xTokenData = {};
+      }
+      window.__xTokenData.xToken = xToken;
+      window.__xTokenData.lastUpdated = Date.now();
+    } else if (isLoggedIn) {
+      console.log('[Entry Extension] 로그인되었지만 x토큰을 찾을 수 없습니다.');
+    } else {
+      console.log('[Entry Extension] 로그인되지 않아 x토큰을 찾을 수 없습니다.');
+    }
+    
+    return { csrfToken, xToken, isLoggedIn };
+  }
+  
+  // 쿠키 값 가져오는 함수
+  function getCookieValue(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+    return null;
   }
 
   /*************************************************
@@ -2128,6 +2315,7 @@ function startEntrystoryScript() {
     const { csrfToken, xToken } = getTokensFromDom();
     requestOptions.headers["csrf-token"] = csrfToken;
     requestOptions.headers["x-token"] = xToken;
+    requestOptions.headers["x-client-type"] = "Client";
 
     // ★ [추가] 기존 사이트 li를 제거하는 함수
     function removeOldSiteLis(targetUl) {
@@ -2418,13 +2606,78 @@ function startEntrystoryScript() {
   }
 
   /***************************************************************
-   * 댓글 작성
+   * 댓글 작성 (이메일 인증 확인 후 진행)
    ***************************************************************/
   function createComment(discussId, content, stickerId = null) {
-    const csrf = requestOptions.headers["csrf-token"];
-    const xtoken = requestOptions.headers["x-token"];
+    // 최신 토큰 값 사용
+    let csrf = requestOptions.headers["csrf-token"];
+    let xtoken = requestOptions.headers["x-token"];
+    
+    // window.__xTokenData에서 최신 x토큰 값이 있으면 사용
+    if (window.__xTokenData && window.__xTokenData.xToken) {
+      console.log('[Entry Extension] 저장된 x토큰 사용:', window.__xTokenData.xToken.substring(0, 10) + '...');
+      xtoken = window.__xTokenData.xToken;
+    } else {
+      console.log('[Entry Extension] requestOptions의 x토큰 사용:', xtoken ? (xtoken.substring(0, 10) + '...') : '없음');
+    }
+    
+    // 토큰이 없으면 DOM에서 다시 가져오기 시도
+    if (!xtoken || xtoken === "") {
+      const tokens = getTokensFromDom();
+      if (tokens.xToken) {
+        console.log('[Entry Extension] DOM에서 x토큰 가져옴:', tokens.xToken.substring(0, 10) + '...');
+        xtoken = tokens.xToken;
+      }
+      if (tokens.csrfToken) {
+        csrf = tokens.csrfToken;
+      }
+      
+      // 로그인 상태 확인 결과 사용
+      const isLoggedIn = tokens.isLoggedIn;
+      console.log('[Entry Extension] createComment에서 로그인 상태 확인 결과:', isLoggedIn);
+      
+      // 토큰이 여전히 없으면 경고만 표시하고 계속 진행
+      if (!xtoken || xtoken === "") {
+        if (!isLoggedIn) {
+          console.warn('[Entry Extension] 로그인되지 않아 x토큰을 가져올 수 없습니다. 로그인 후 다시 시도하세요.');
+          // 로그인 상태가 아닌 경우에만 알림 표시
+          alert('댓글을 작성하려면 로그인이 필요합니다.');
+          return; // 로그인되지 않은 경우 함수 종료
+        } else {
+          // 로그인은 되어 있지만 토큰을 찾지 못한 경우 - 경고만 표시하고 계속 진행
+          console.warn('[Entry Extension] 로그인되었지만 x토큰을 찾을 수 없습니다. 계속 진행합니다.');
+        }
+      }
+    }
 
-    const bodyData = {
+    // 이메일 인증 확인 요청 데이터
+    const emailAuthCheckData = {
+      query: `
+        query CURRENT_USER_EMAIL_AUTH {
+          me {
+            role
+            isEmailAuth
+          }
+        }
+      `
+    };
+
+    // 이메일 인증 확인 요청 옵션
+    const emailAuthCheckOptions = {
+      headers: {
+        "accept": "*/*",
+        "content-type": "application/json",
+        "csrf-token": csrf,
+        "x-token": xtoken,
+        "x-client-type": "Client"
+      },
+      body: JSON.stringify(emailAuthCheckData),
+      method: "POST",
+      credentials: "include"
+    };
+
+    // 댓글 작성 요청 데이터
+    const commentBodyData = {
       query: `
         mutation CREATE_COMMENT(
           $content: String
@@ -2467,19 +2720,36 @@ function startEntrystoryScript() {
       }
     };
 
-    const fetchOptions = {
+    // 댓글 작성 요청 옵션
+    const commentFetchOptions = {
       headers: {
         "accept": "*/*",
         "content-type": "application/json",
         "csrf-token": csrf,
-        "x-token": xtoken
+        "x-token": xtoken,
+        "x-client-type": "Client"
       },
-      body: JSON.stringify(bodyData),
+      body: JSON.stringify(commentBodyData),
       method: "POST",
       credentials: "include"
     };
 
-    return fetch("https://playentry.org/graphql/CREATE_COMMENT", fetchOptions)
+    // 먼저 이메일 인증 확인 요청을 보내고, 그 후 댓글 작성 요청을 보냄
+    console.log('[Entry Extension] 이메일 인증 확인 요청 전송');
+    return fetch("https://playentry.org/graphql/CURRENT_USER_EMAIL_AUTH", emailAuthCheckOptions)
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`EMAIL_AUTH_CHECK failed: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((emailAuthResult) => {
+        console.log('[Entry Extension] 이메일 인증 확인 결과:', emailAuthResult);
+        
+        // 이메일 인증 확인 후 댓글 작성 요청 전송
+        console.log('[Entry Extension] 댓글 작성 요청 전송');
+        return fetch("https://playentry.org/graphql/CREATE_COMMENT", commentFetchOptions);
+      })
       .then((res) => {
         if (!res.ok) {
           throw new Error(`CREATE_COMMENT failed: ${res.status}`);
@@ -2489,10 +2759,12 @@ function startEntrystoryScript() {
       .then(() => {
         // 댓글 작성 성공 후 스티커ID 초기화
         window.__selectedStickerId = null;
+        console.log('[Entry Extension] 댓글 작성 성공');
 
         return refetchCommentsAndUpdate(discussId);
       })
-      .catch(() => {
+      .catch((error) => {
+        console.error('[Entry Extension] 댓글 작성 오류:', error);
         alert("댓글 달기에 실패했습니다. 잠시 후 다시 시도해주세요.");
       });
   }

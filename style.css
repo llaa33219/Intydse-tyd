@@ -718,3 +718,29 @@
 .css-ahy3yn .replay_inner {
   margin: -13px -27px 14px;
 }
+.css-anbigi > ul > li {
+  float: left;
+  margin: 18px 0px 0px 41px;
+}
+.css-anbigi > ul > li > span {
+  display: block;
+  overflow: hidden;
+  position: relative;
+  width: 74px;
+  height: 74px;
+  padding: 0px;
+  transition: opacity 0.1s;
+  cursor: pointer;
+}
+.css-zcg0zv {
+  position: relative;
+  padding: 0px 55px;
+}
+.css-xq7ycv {
+  white-space: nowrap;
+}
+.css-1nidk14 {
+  display: inline-block;
+  position: relative;
+  vertical-align: top;
+}
